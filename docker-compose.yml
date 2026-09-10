@@ -1,0 +1,11 @@
+services:
+  relay:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # A container must listen on its container interface. Keep the published
+      # port loopback-only unless an external firewall/proxy is intentional.
+      HOST: 0.0.0.0
+    ports:
+      - "127.0.0.1:8787:8787"

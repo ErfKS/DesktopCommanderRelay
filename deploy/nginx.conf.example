@@ -1,0 +1,31 @@
+# Put inside the HTTPS server block for relay.example.com.
+# TLS should terminate here (or at Traefik/Cloudflare), not in the Node process.
+
+location = /mcp {
+    proxy_pass http://127.0.0.1:8787;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header Authorization $http_authorization;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_read_timeout 310s;
+    proxy_send_timeout 310s;
+    proxy_request_buffering off;
+    proxy_buffering off;
+    client_max_body_size 32m;
+}
+
+location = /agent {
+    proxy_pass http://127.0.0.1:8787;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_set_header Authorization $http_authorization;
+    proxy_set_header X-Desktop-Commander-Device-Id $http_x_desktop_commander_device_id;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_buffering off;
+}
