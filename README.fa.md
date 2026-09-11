@@ -10,20 +10,21 @@
 
 ‏DesktopCommanderRelay از دو مسیر ورودی راه‌دور پشتیبانی می‌کند که از یک Relay Server و Agent انتخاب‌شدهٔ مشترک استفاده می‌کنند.
 
-```text
-Remote MCP client                         ChatGPT Custom GPT / Action client
-        |                                             |
-        | Streamable HTTP MCP + MCP_API_KEY           | HTTPS REST + ACTION_API_KEY
-        v                                             v
-                    Relay Server (remote server)
-                              |
-                               | WebSocket + AGENT_TOKEN
-                              v
-                    Relay Agent (controlled computer)
-                              |
-                               | stdio MCP
-                              v
-                    DesktopCommanderMCP
+```mermaid
+flowchart TD
+    subgraph RemoteClients["کلاینت‌های راه‌دور"]
+        MCP["Remote MCP client"]
+        GPT["ChatGPT Custom GPT / Action client"]
+    end
+
+    Server["Relay Server<br/>سرور راه‌دور"]
+    Agent["Relay Agent<br/>کامپیوتر کنترل‌شونده"]
+    DCM["DesktopCommanderMCP"]
+
+    MCP -->|"Streamable HTTP MCP<br/>MCP_API_KEY"| Server
+    GPT -->|"HTTPS REST<br/>ACTION_API_KEY"| Server
+    Server -->|"WebSocket<br/>AGENT_TOKEN"| Agent
+    Agent -->|"stdio MCP"| DCM
 ```
 
 ‏مسیر MCP و مسیر Action دارای credentialها و مرزهای اعتماد جداگانه هستند:
