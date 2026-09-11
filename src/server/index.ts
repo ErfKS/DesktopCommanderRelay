@@ -5,6 +5,7 @@ import { bearerMiddleware } from './auth.js';
 import { DeviceRegistry } from './device-registry.js';
 import { AgentWebSocketServer } from './ws-agent-server.js';
 import { createMcpRequestHandler } from './mcp.js';
+import { createActionRouter } from './action-api.js';
 import { envBool, envInt, envOptional, envString, splitCsv } from '../shared/env.js';
 import { normalizeDeviceId } from '../shared/security.js';
 import { RELAY_VERSION } from '../shared/version.js';
@@ -17,6 +18,8 @@ const agentPath = envString('AGENT_WS_PATH', '/agent');
 const allowInsecureLocal = envBool('ALLOW_INSECURE_LOCAL', false);
 const mcpApiKey = envOptional('MCP_API_KEY');
 const agentToken = envOptional('AGENT_TOKEN');
+const actionApiKey = envOptional('ACTION_API_KEY');
+const actionPath = envString('ACTION_PATH', '/action');
 const targetDeviceId = envOptional('TARGET_DEVICE_ID') ? normalizeDeviceId(envString('TARGET_DEVICE_ID')) : undefined;
 const callTimeoutMs = envInt('TOOL_CALL_TIMEOUT_MS', 300_000, 1_000);
 const wsMaxPayload = envInt('WS_MAX_PAYLOAD_BYTES', 32 * 1024 * 1024, 1024);
@@ -53,6 +56,16 @@ app.use((_req, res, next) => {
 app.get('/healthz', (_req, res) => {
   res.json({ ok: true, version: RELAY_VERSION, devices: registry.listDevices().length });
 });
+
+app.use(
+  actionPath,
+  createActionRouter(
+    registry,
+    actionApiKey,
+    allowInsecureLocal,
+    httpBodyLimit,
+  ),
+);
 
 const mcpRequestHandler = createMcpRequestHandler(registry);
 const validateMcpHost = hostHeaderValidation(allowedHostnames);
