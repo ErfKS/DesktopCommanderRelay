@@ -119,7 +119,7 @@ Run from a machine that can reach the public hostname:
 curl -fsS https://relay.example.com/healthz
 ```
 
-The endpoint returns HTTP 200 and JSON containing `"ok": true`; before the agent starts, `"devices"` should be `0`.
+The endpoint is expected to return a successful health response containing the server status fields implemented by this project; before the agent starts, the connected device count should be `0`.
 
 ### 7. Build and start the Relay Agent on the controlled computer
 
@@ -178,7 +178,7 @@ POSIX shell:
 export DESKTOP_COMMANDER_RELAY_API_KEY='<same-generated-mcp-api-key-as-server>'
 ```
 
-With that variable set, run the installed Codex CLI command:
+With that variable set, run the Codex CLI command shown below if your installed Codex CLI exposes the same MCP bearer-token option (verify with `codex mcp add --help`):
 
 ```text
 codex mcp add desktop-commander-relay --url https://relay.example.com/mcp --bearer-token-env-var DESKTOP_COMMANDER_RELAY_API_KEY
