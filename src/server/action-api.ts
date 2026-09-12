@@ -20,19 +20,46 @@ function parseOptionalDeviceId(value: unknown): string | undefined {
   return normalizeDeviceId(value);
 }
 
-const BLOCKED_ACTION_TOOLS = new Set([
+const ALWAYS_BLOCKED_ACTION_TOOLS = new Set([
   'set_config_value',
+  'kill_process',
+]);
+
+const SANDBOX_ONLY_ACTION_TOOLS = new Set([
   'start_process',
   'interact_with_process',
   'read_process_output',
   'force_terminate',
-  'kill_process',
 ]);
 
-function isActionToolAllowed(name: string): boolean {
-  return !BLOCKED_ACTION_TOOLS.has(name);
+function parseSandboxDeviceIds(value: string | undefined): Set<string> {
+  const deviceIds = new Set<string>();
+
+  for (const raw of (value ?? '').split(',')) {
+    const candidate = raw.trim();
+    if (!candidate) continue;
+
+    deviceIds.add(normalizeDeviceId(candidate));
+  }
+
+  return deviceIds;
 }
 
+function isActionToolAllowed(
+  name: string,
+  deviceId: string | undefined,
+  sandboxDeviceIds: ReadonlySet<string>,
+): boolean {
+  if (ALWAYS_BLOCKED_ACTION_TOOLS.has(name)) {
+    return false;
+  }
+
+  if (SANDBOX_ONLY_ACTION_TOOLS.has(name)) {
+    return deviceId !== undefined && sandboxDeviceIds.has(deviceId);
+  }
+
+  return true;
+}
 function summarizeTool(tool: ToolDefinition): Record<string, unknown> {
   return {
     name: tool.name,
@@ -47,6 +74,9 @@ export function createActionRouter(
   httpBodyLimit: string,
 ) {
   const router = express.Router();
+  const sandboxDeviceIds = parseSandboxDeviceIds(
+    process.env.ACTION_SANDBOX_DEVICE_IDS,
+  );
 
   router.use(bearerMiddleware(actionApiKey, allowInsecureLocal));
 
@@ -90,7 +120,7 @@ export function createActionRouter(
     }
 
     const tools = registry.listMcpTools(deviceId).filter((tool) =>
-      isActionToolAllowed(tool.name),
+      isActionToolAllowed(tool.name, deviceId, sandboxDeviceIds),
     );
 
     const requestedName =
@@ -140,14 +170,6 @@ export function createActionRouter(
         return;
       }
 
-      if (!isActionToolAllowed(name)) {
-        res.status(403).json({
-          ok: false,
-          error: `Tool '${name}' is not permitted through ChatGPT Actions`,
-        });
-        return;
-      }
-
       let deviceId: string | undefined;
 
       if (isJsonObject(req.body) && 'device_id' in req.body) {
@@ -160,6 +182,14 @@ export function createActionRouter(
           });
           return;
         }
+      }
+
+      if (!isActionToolAllowed(name, deviceId, sandboxDeviceIds)) {
+        res.status(403).json({
+          ok: false,
+          error: `Tool '${name}' is not permitted through ChatGPT Actions`,
+        });
+        return;
       }
 
       let args: JsonObject = {};
