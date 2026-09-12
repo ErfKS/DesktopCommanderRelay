@@ -23,6 +23,7 @@ test('forwards a real Streamable HTTP MCP call through an authenticated agent', 
       MCP_ALLOWED_HOSTS: '127.0.0.1',
       MCP_ALLOWED_ORIGINS: 'http://127.0.0.1',
       TOOL_CALL_TIMEOUT_MS: '2000',
+      TARGET_DEVICE_ID: 'e2e-pc',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
