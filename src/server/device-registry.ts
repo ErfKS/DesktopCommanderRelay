@@ -81,6 +81,11 @@ export class DeviceRegistry {
     return null;
   }
 
+  getDevice(deviceId: string): RegisteredDevice | null {
+    const device = this.devices.get(deviceId);
+    return device?.socket.readyState === WebSocket.OPEN ? device : null;
+  }
+
   selectionProblem(): string | null {
     if (this.targetDeviceId && !this.getSelectedDevice()) {
       return `Configured TARGET_DEVICE_ID '${this.targetDeviceId}' is not connected.`;
@@ -92,16 +97,31 @@ export class DeviceRegistry {
     return null;
   }
 
-  listMcpTools(): ToolDefinition[] {
-    const device = this.getSelectedDevice();
+  listMcpTools(deviceId?: string): ToolDefinition[] {
+    const device = deviceId ? this.getDevice(deviceId) : this.getSelectedDevice();
     if (!device) return [];
     return [...device.tools.values()].filter((tool) => !RESERVED_TOOLS.has(tool.name));
   }
 
-  async callTool(name: string, args: JsonObject, metadata: JsonObject = {}): Promise<unknown> {
+  async callTool(
+    name: string,
+    args: JsonObject,
+    metadata: JsonObject = {},
+    deviceId?: string,
+  ): Promise<unknown> {
     if (this.closed) throw new Error('Relay is shutting down');
-    const device = this.getSelectedDevice();
-    if (!device) throw new Error(this.selectionProblem() ?? 'No target device available');
+
+    const device = deviceId
+      ? this.getDevice(deviceId)
+      : this.getSelectedDevice();
+
+    if (!device) {
+      if (deviceId) {
+        throw new Error(`Device '${deviceId}' is not connected`);
+      }
+
+      throw new Error(this.selectionProblem() ?? 'No target device available');
+    }
     if (!device.tools.has(name)) throw new Error(`Tool '${name}' is not available on device '${device.id}'`);
     if (device.socket.readyState !== WebSocket.OPEN) throw new Error(`Device '${device.id}' is not connected`);
 

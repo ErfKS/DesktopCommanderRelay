@@ -2,9 +2,22 @@ import express from 'express';
 import type { JsonObject, ToolDefinition } from '../shared/protocol.js';
 import { bearerMiddleware } from './auth.js';
 import { DeviceRegistry } from './device-registry.js';
+import { normalizeDeviceId } from '../shared/security.js';
 
 function isJsonObject(value: unknown): value is JsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parseOptionalDeviceId(value: unknown): string | undefined {
+  if (value === undefined || value === null || value === '') {
+    return undefined;
+  }
+
+  if (typeof value !== 'string') {
+    throw new Error('Invalid device_id');
+  }
+
+  return normalizeDeviceId(value);
 }
 
 const BLOCKED_ACTION_TOOLS = new Set([
@@ -56,7 +69,27 @@ export function createActionRouter(
   });
 
   router.get('/tools', (req, res) => {
-    const tools = registry.listMcpTools().filter((tool) =>
+    let deviceId: string | undefined;
+
+    try {
+      deviceId = parseOptionalDeviceId(req.query.device_id);
+    } catch {
+      res.status(400).json({
+        ok: false,
+        error: 'Invalid device_id',
+      });
+      return;
+    }
+
+    if (deviceId && !registry.getDevice(deviceId)) {
+      res.status(404).json({
+        ok: false,
+        error: `Device '${deviceId}' is not connected`,
+      });
+      return;
+    }
+
+    const tools = registry.listMcpTools(deviceId).filter((tool) =>
       isActionToolAllowed(tool.name),
     );
 
@@ -115,6 +148,20 @@ export function createActionRouter(
         return;
       }
 
+      let deviceId: string | undefined;
+
+      if (isJsonObject(req.body) && 'device_id' in req.body) {
+        try {
+          deviceId = parseOptionalDeviceId(req.body.device_id);
+        } catch {
+          res.status(400).json({
+            ok: false,
+            error: 'Invalid device_id',
+          });
+          return;
+        }
+      }
+
       let args: JsonObject = {};
 
       if (req.body !== undefined && req.body !== null) {
@@ -139,7 +186,8 @@ export function createActionRouter(
 
           args = candidate;
         } else {
-          args = req.body;
+          args = { ...req.body };
+          delete args.device_id;
         }
       }
 
@@ -150,10 +198,12 @@ export function createActionRouter(
           {
             transport: 'chatgpt-action',
           },
+          deviceId,
         );
 
         res.json({
           ok: true,
+          device_id: deviceId ?? registry.getSelectedDevice()?.id ?? null,
           tool: name,
           result,
         });
