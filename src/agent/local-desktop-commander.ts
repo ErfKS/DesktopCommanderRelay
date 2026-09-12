@@ -123,6 +123,17 @@ export async function resolveDesktopCommanderCommand(): Promise<CommandSpec> {
     return { command: process.execPath, args: [absolute], cwd: path.dirname(absolute) };
   }
 
+  const explicitCommand = process.env.DESKTOP_COMMANDER_COMMAND?.trim();
+  if (explicitCommand) {
+    const rawArgs = process.env.DESKTOP_COMMANDER_ARGS_JSON?.trim() || '[]';
+    let args: unknown;
+    try { args = JSON.parse(rawArgs); } catch { throw new Error('DESKTOP_COMMANDER_ARGS_JSON must be a JSON array'); }
+    if (!Array.isArray(args) || args.some((item) => typeof item !== 'string')) {
+      throw new Error('DESKTOP_COMMANDER_ARGS_JSON must be a JSON array of strings');
+    }
+    return { command: explicitCommand, args: args as string[] };
+  }
+
   // Convenient for the user's two-source-folder workspace.
   const moduleDir = path.dirname(fileURLToPath(import.meta.url));
   const siblingBuild = path.resolve(moduleDir, '../../../DesktopCommanderMCP/dist/index.js');
@@ -131,12 +142,12 @@ export async function resolveDesktopCommanderCommand(): Promise<CommandSpec> {
     return { command: process.execPath, args: [siblingBuild], cwd: path.dirname(siblingBuild) };
   } catch { /* fall through */ }
 
-  const command = process.env.DESKTOP_COMMANDER_COMMAND?.trim() || 'desktop-commander';
   const rawArgs = process.env.DESKTOP_COMMANDER_ARGS_JSON?.trim() || '[]';
   let args: unknown;
   try { args = JSON.parse(rawArgs); } catch { throw new Error('DESKTOP_COMMANDER_ARGS_JSON must be a JSON array'); }
   if (!Array.isArray(args) || args.some((item) => typeof item !== 'string')) {
     throw new Error('DESKTOP_COMMANDER_ARGS_JSON must be a JSON array of strings');
   }
-  return { command, args: args as string[] };
+
+  return { command: 'desktop-commander', args: args as string[] };
 }
