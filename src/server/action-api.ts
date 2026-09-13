@@ -3,6 +3,10 @@ import type { JsonObject, ToolDefinition } from '../shared/protocol.js';
 import { bearerMiddleware } from './auth.js';
 import { DeviceRegistry } from './device-registry.js';
 import { normalizeDeviceId } from '../shared/security.js';
+import {
+  createVisionBridgeFromEnv,
+  VisionBridgeError,
+} from './vision-bridge.js';
 
 function isJsonObject(value: unknown): value is JsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -78,6 +82,7 @@ export function createActionRouter(
     process.env.ACTION_SANDBOX_DEVICE_IDS,
   );
 
+  const visionBridge = createVisionBridgeFromEnv(registry);
   router.use(bearerMiddleware(actionApiKey, allowInsecureLocal));
 
   router.get('/status', (_req, res) => {
@@ -98,6 +103,129 @@ export function createActionRouter(
     });
   });
 
+  router.post(
+    '/images/analyze',
+    express.json({
+      limit: httpBodyLimit,
+      type: ['application/json', 'application/*+json'],
+    }),
+    async (req, res) => {
+      if (!isJsonObject(req.body)) {
+        res.status(400).json({
+          ok: false,
+          error: 'Request body must be a JSON object',
+        });
+        return;
+      }
+
+      let deviceId: string | undefined;
+
+      try {
+        deviceId = parseOptionalDeviceId(req.body.device_id);
+      } catch {
+        res.status(400).json({
+          ok: false,
+          error: 'Invalid device_id',
+        });
+        return;
+      }
+
+      if (!deviceId) {
+        res.status(400).json({
+          ok: false,
+          error: 'device_id is required',
+        });
+        return;
+      }
+
+      if (typeof req.body.path !== 'string') {
+        res.status(400).json({
+          ok: false,
+          error: 'path must be a string',
+        });
+        return;
+      }
+
+      if (
+        req.body.prompt !== undefined &&
+        typeof req.body.prompt !== 'string'
+      ) {
+        res.status(400).json({
+          ok: false,
+          error: 'prompt must be a string',
+        });
+        return;
+      }
+
+      if (
+        req.body.detail !== undefined &&
+        typeof req.body.detail !== 'string'
+      ) {
+        res.status(400).json({
+          ok: false,
+          error: 'detail must be a string',
+        });
+        return;
+      }
+
+      try {
+        const result = await visionBridge.analyze({
+          deviceId,
+          path: req.body.path,
+          prompt:
+            typeof req.body.prompt === 'string'
+              ? req.body.prompt
+              : undefined,
+          detail:
+            typeof req.body.detail === 'string'
+              ? req.body.detail
+              : undefined,
+        });
+
+        res.json({
+          ok: true,
+          device_id: result.deviceId,
+          path: result.path,
+          mime_type: result.mimeType,
+          bytes: result.bytes,
+          model: result.model,
+          detail: result.detail,
+          analysis: result.analysis,
+        });
+      } catch (error) {
+        if (error instanceof VisionBridgeError) {
+          res.status(error.status).json({
+            ok: false,
+            error: error.message,
+          });
+          return;
+        }
+
+        const message =
+          error instanceof Error
+            ? error.message
+            : String(error);
+
+        let status = 502;
+
+        if (message.includes('not available')) {
+          status = 404;
+        } else if (
+          message.includes('not connected') ||
+          message.includes('No Desktop Commander agent')
+        ) {
+          status = 409;
+        } else if (message.includes('timed out')) {
+          status = 504;
+        }
+
+        res.status(status).json({
+          ok: false,
+          error: message,
+        });
+      }
+    },
+  );
   router.get('/tools', (req, res) => {
     let deviceId: string | undefined;
 

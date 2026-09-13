@@ -248,40 +248,70 @@ https://relay.example.com
 | `GET` | `/action/status` | ‏deviceهای متصل، device انتخاب‌شده و هرگونه مشکل مربوط به انتخاب device را برمی‌گرداند. |
 | `GET` | `/action/tools` | ‏ابزارهای DesktopCommander قابل‌مشاهده برای Action را فهرست می‌کند. |
 | `GET` | `/action/tools?name=<tool>` | ‏تعریف کامل یک ابزار قابل‌مشاهده برای Action را برمی‌گرداند. |
-| `POST` | `/action/tools/{name}/call` | ‏یک ابزار مجاز DesktopCommander را روی Agent انتخاب‌شده فراخوانی می‌کند. |
+| `POST` | `/action/tools/{name}/call` | ‏یک ابزار مجاز DesktopCommander را فراخوانی می‌کند. اگر `device_id` صریح ارائه شود، بر target پیش‌فرض Relay اولویت دارد. |
+| `POST` | `/action/images/analyze` | ‏یک تصویر local مجاز را از device صریحاً انتخاب‌شده و مجاز برای Vision می‌خواند و تحلیل بصری متنی به‌همراه metadata تصویر برمی‌گرداند. |
 
 ‏فراخوانی ابزارها از ساختار request زیر استفاده می‌کند:
 
 ```json
 {
+  "device_id": "home-pc-sandbox",
   "arguments": {
-    "path": "C:\\Users\\user\\Projects\\example.txt"
+    "path": "/projects/example/file.txt"
   }
 }
 ```
 
-‏Action API از همان منطق انتخاب device سمت Server که در مسیر MCP استفاده می‌شود بهره می‌برد. `/action/status` می‌تواند چند Agent متصل را گزارش کند، اما فراخوانی عادی ابزارهای Action همچنان به device انتخاب‌شده توسط `TARGET_DEVICE_ID` یا fallback تک-device خود Relay ارسال می‌شود.
+‏برای فراخوانی‌های عادی ابزارهای Action، `device_id` اختیاری است. اگر ارائه شود، بر `TARGET_DEVICE_ID` و fallback تک-device اولویت دارد. فراخوانی‌های بدون `device_id` از قواعد معمول انتخاب device در Relay استفاده می‌کنند. ابزارهای process/session سخت‌گیرانه‌تر هستند و به یک `device_id` صریح نیاز دارند که داخل `ACTION_SANDBOX_DEVICE_IDS` باشد.
+
+### ‏Vision Bridge
+
+‏مسیر `POST /action/images/analyze` یک endpoint اختصاصی برای تحلیل تصویر است. این endpoint همیشه به `device_id` صریح نیاز دارد و هیچ fallbackای به `TARGET_DEVICE_ID` ندارد.
+
+‏نمونهٔ request:
+
+```json
+{
+  "device_id": "home-pc-sandbox",
+  "path": "/projects/example/.artifacts/preview.jpg",
+  "prompt": "چیدمان، تایپوگرافی، کنتراست، سلسله‌مراتب بصری، خوانایی و مشکلات قابل مشاهده را بررسی کن.",
+  "detail": "high"
+}
+```
+
+‏device انتخاب‌شده باید داخل `ACTION_VISION_DEVICE_IDS` باشد. مسیر تصویر باید یک path مطلق محلی لینوکس در `/projects/` یا `/workspace/` باشد و یکی از پسوندهای `.png`، `.jpg`، `.jpeg`، `.webp` یا `.gif` را داشته باشد. URL، Windows path، parent-directory traversal، پسوندهای پشتیبانی‌نشده و MIME typeهای تصویری پشتیبانی‌نشده رد می‌شوند.
+
+‏Relay تصویر را با URL mode غیرفعال از طریق Desktop Commander می‌خواند، محدودیت اندازهٔ decoded image را اعمال می‌کند و سپس تصویر و prompt تحلیل را با `OPENAI_API_KEY` سمت Server به OpenAI Responses API می‌فرستد. Action client فقط تحلیل متنی و metadata تصویر را دریافت می‌کند و base64 تصویر به Custom GPT برگردانده نمی‌شود.
+
+‏متن یا instructionهای قابل‌مشاهده داخل تصویر توسط Vision Bridge به‌عنوان دادهٔ غیرقابل‌اعتماد تصویر در نظر گرفته می‌شوند، نه دستورهایی که باید اجرا شوند. فعال کردن این endpoint یعنی تصویر انتخاب‌شده و prompt تحلیل از device کنترل‌شده خارج می‌شوند و توسط OpenAI API account پیکربندی‌شده پردازش می‌شوند.
 
 ## ‏سیاست ابزارهای ChatGPT Action
 
-‏رابط Action عمداً مجموعه‌ای از ابزارهای DesktopCommander را مخفی و رد می‌کند؛ ابزارهایی که ممکن است محدودیت‌های filesystem را دور بزنند یا policy محلی را تغییر دهند.
+‏رابط Action پیش از forward کردن فراخوانی ابزارهای DesktopCommander، یک policy اضافی در سمت Server اعمال می‌کند.
 
-‏ابزارهای زیر در حال حاضر از طریق `/action` مسدود هستند:
+‏ابزارهای زیر همیشه از طریق `/action` مسدود هستند:
 
 ```text
 set_config_value
+kill_process
+```
+
+‏ابزارهای process/session زیر به‌صورت شرطی قابل استفاده هستند:
+
+```text
 start_process
 interact_with_process
 read_process_output
 force_terminate
-kill_process
 ```
 
-‏ابزارهای مسدودشده از `/action/tools` حذف می‌شوند. تلاش مستقیم برای فراخوانی یکی از آن‌ها، HTTP `403` همراه با خطایی برمی‌گرداند که مشخص می‌کند ابزار از طریق ChatGPT Actions مجاز نیست.
+‏این ابزارهای process/session به `device_id` صریح نیاز دارند و device باید داخل `ACTION_SANDBOX_DEVICE_IDS` باشد. بدون یک device صریح و مجاز، این ابزارها از `/action/tools` مخفی می‌شوند و فراخوانی مستقیم آن‌ها HTTP `403` برمی‌گرداند.
 
-‏این فیلتر فقط روی رابط HTTP Action اعمال می‌شود. این کار ابزارها را از خود DesktopCommanderMCP حذف نمی‌کند و دسترسی احتمالی یک MCP client جداگانه و احراز هویت‌شده به آن ابزارها را تغییر نمی‌دهد.
+‏نام `ACTION_SANDBOX_DEVICE_IDS` یک نام legacy است. اضافه کردن یک device به این لیست **آن را sandbox نمی‌کند** و هیچ isolation boundary جدیدی نمی‌سازد؛ بلکه اجرای process از طریق Action را با permissionهای Relay Agent/DesktopCommander روی همان device مجاز می‌کند. فقط deviceهایی را در این لیست قرار دهید که این capability عمداً برایشان مجاز است.
 
-‏سیاست فعلی مبتنی بر blocklist است. اگر به یک مرز امنیتی سخت‌گیرانه و file-only نیاز دارید، بهتر است آن را با یک allowlist صریح سمت Server جایگزین کنید تا ابزارهای جدیدی که در آینده به DesktopCommander upstream اضافه می‌شوند به‌صورت خودکار expose نشوند.
+‏این filtering فقط روی رابط HTTP Action اعمال می‌شود. ابزارها را از خود DesktopCommanderMCP حذف نمی‌کند و capabilityهای یک MCP client جداگانه و احراز هویت‌شده را کاهش نمی‌دهد.
+
+‏بخش باقی‌ماندهٔ policy Action یک allowlist بستهٔ per-tool نیست. بعد از upgrade کردن DesktopCommanderMCP، مسیر `/action/tools` را بررسی کنید تا ابزار جدیدی از upstream ناخواسته expose نشده باشد.
 
 ## ‏محدودیت‌های filesystem در DesktopCommander
 
@@ -304,7 +334,7 @@ kill_process
 
 - ‏بسته به semantics تنظیمات DesktopCommanderMCP، خالی بودن `allowedDirectories` ممکن است به معنای دسترسی نامحدود به filesystem باشد. پیش از در معرض قرار دادن یک remote client، تنظیم محلی را بررسی کنید.
 - ‏Action API ابزار `set_config_value` را مسدود می‌کند، بنابراین یک ChatGPT Action client نمی‌تواند از طریق Action adapter فعلی مقدار `allowedDirectories` را حذف یا گسترش دهد.
-- ‏Action API همچنین ابزارهای terminal/process ذکرشده در بالا را مسدود می‌کند تا نتوان از طریق Actions به‌سادگی محدودیت path در filesystem را دور زد.
+- ‏ابزارهای process/session فقط زمانی از طریق Actions قابل استفاده‌اند که caller یک `device_id` صریح موجود در `ACTION_SANDBOX_DEVICE_IDS` ارائه کند. device را فقط زمانی به این لیست اضافه کنید که اجرای process روی آن عمداً مجاز باشد.
 - ‏این محدودیت‌ها به‌صورت خودکار یک client مستقیم/محلی دیگر برای DesktopCommander که دسترسی گسترده‌تری به ابزارها دارد را محدود نمی‌کنند.
 - ‏permissionهای سیستم‌عامل یک مرز نهایی قوی‌تر هستند. برای deploymentهایی که به اطمینان امنیتی بیشتری نیاز دارند، Agent/DesktopCommander را تحت یک حساب کاربری اختصاصی سیستم‌عامل اجرا کنید که فقط به directoryهای موردنیاز دسترسی داشته باشد.
 
@@ -335,6 +365,14 @@ kill_process
 | `AGENT_WS_PATH` | `/agent` | ‏مسیر WebSocket مربوط به Agent. |
 | `MCP_API_KEY` | ‏الزامی، مگر اینکه insecure loopback mode فعال باشد | ‏Bearer token برای درخواست‌های HTTP مربوط به MCP. |
 | `ACTION_API_KEY` | ‏هنگام expose کردن عمومی Action API الزامی است | ‏Bearer token مستقل برای `/action/*`. از `MCP_API_KEY` یا `AGENT_TOKEN` مجدداً استفاده نکنید. |
+| `ACTION_SANDBOX_DEVICE_IDS` | ‏پیش‌فرض خالی | ‏فهرست comma-separated از device IDهایی که با `device_id` صریح اجازهٔ استفاده از ابزارهای process/session را از طریق Actions دارند. با وجود نام legacy، عضویت در این لیست به‌تنهایی sandbox ایجاد نمی‌کند. |
+| `ACTION_VISION_DEVICE_IDS` | ‏پیش‌فرض خالی | ‏فهرست comma-separated از device IDهای مجاز برای `/action/images/analyze`. این endpoint همیشه به `device_id` صریح نیاز دارد. |
+| `OPENAI_API_KEY` | ‏فقط برای Vision Bridge لازم است | ‏credential سمت Server برای OpenAI API و تحلیل تصویر. آن را داخل Git، Action schema، Agent environment یا client configuration قرار ندهید. |
+| `VISION_MODEL` | `gpt-5.6` | ‏مدل مورد استفاده توسط Vision Bridge. |
+| `VISION_MAX_IMAGE_BYTES` | `5242880` | ‏حداکثر اندازهٔ decoded image قابل‌قبول برای Vision Bridge. |
+| `VISION_MAX_PROMPT_CHARS` | `12000` | ‏حداکثر طول prompt مربوط به تحلیل Vision. |
+| `VISION_MAX_OUTPUT_TOKENS` | `4000` | ‏حداکثر output token درخواست‌شده از مدل Vision. |
+| `VISION_OPENAI_TIMEOUT_MS` | `60000` | ‏timeout مربوط به درخواست Vision به OpenAI. |
 | `AGENT_TOKEN` | ‏الزامی، مگر اینکه insecure loopback mode فعال باشد | ‏Bearer token مستقل برای اتصال WebSocket مربوط به Agent. |
 | `TARGET_DEVICE_ID` | ‏اختیاری | ‏یک device متصل را انتخاب می‌کند. بدون target، در صورت وجود فقط یک device متصل، همان device به‌صورت خودکار انتخاب می‌شود. |
 | `MCP_ALLOWED_HOSTS` | ‏در صورت unset بودن: `localhost,127.0.0.1,[::1]`؛ برای bind عمومی الزامی است | ‏hostnameهای مجاز جداشده با comma، بدون scheme یا port. |
@@ -375,7 +413,9 @@ kill_process
 - ‏اگر `TARGET_DEVICE_ID` آفلاین باشد، ابزارهای معمول DesktopCommanderMCP تا زمان reconnect آن در دسترس نخواهند بود.
 - ‏`relay_status` و `relay_list_devices` همیشه از طریق MCP relay برای وضعیت و کشف device در دسترس هستند.
 - ‏`/action/status`، deviceهای متصل و device انتخاب‌شده را به Action client گزارش می‌کند.
-- ‏endpoint فعلی Action برای فراخوانی tool، پارامتر `device_id` را در هر request نمی‌پذیرد؛ از device انتخاب‌شده توسط Server استفاده می‌کند.
+- ‏فراخوانی‌های عادی ابزارهای Action می‌توانند `device_id` را در هر request ارائه کنند؛ device صریح بر `TARGET_DEVICE_ID` و fallback تک-device اولویت دارد.
+- ‏ابزارهای process/session در Action به یک device صریح موجود در `ACTION_SANDBOX_DEVICE_IDS` نیاز دارند.
+- ‏مسیر `/action/images/analyze` به یک device صریح موجود در `ACTION_VISION_DEVICE_IDS` نیاز دارد و هیچ‌وقت به device انتخاب‌شدهٔ Server fallback نمی‌کند.
 
 ## ‏امنیت
 
@@ -387,7 +427,9 @@ kill_process
 
 ‏هر کسی که `ACTION_API_KEY` را داشته باشد می‌تواند از ابزارهایی که از طریق `/action/tools` expose شده‌اند استفاده کند. Action adapter فعلی فیلتر ابزار سمت Server خودش را اعمال می‌کند و ابزارهای مسدودشدهٔ مستندشده در بالا را رد می‌کند. این فیلتر مخصوص Action، خود DesktopCommanderMCP را تغییر نمی‌دهد.
 
-‏حتی با وجود مسدود بودن ابزارهای process، Action API را همچنان یک interface قدرتمند برای remote control در نظر بگیرید. ابزارهای باقی‌مانده همچنان ممکن است داخل directoryهای مجاز محلی فایل‌ها را بخوانند، ایجاد کنند، تغییر دهند، جابه‌جا کنند، جستجو کنند یا اطلاعات آن‌ها را بررسی کنند. بعضی ابزارهای DesktopCommander ممکن است رفتارهای غیر-filesystem نیز داشته باشند؛ پیش از دادن Action key به یک client، لیست ابزارهای قابل‌مشاهده را بررسی کنید.
+‏Action API را یک interface قدرتمند برای remote control در نظر بگیرید. ابزارهای process/session ممکن است برای deviceهای صریحاً مجاز فعال باشند و ابزارهای باقی‌مانده نیز می‌توانند داخل directoryهای مجاز محلی فایل‌ها را بخوانند، ایجاد کنند، تغییر دهند، جابه‌جا کنند، جستجو کنند یا اطلاعات آن‌ها را بررسی کنند. بعضی ابزارهای DesktopCommander ممکن است رفتارهای غیر-filesystem نیز داشته باشند؛ پیش از دادن Action key به یک client، لیست ابزارهای قابل‌مشاهده را بررسی کنید.
+
+‏وقتی Vision Bridge فعال باشد، تصویر انتخاب‌شده و prompt مربوط به Vision از Relay Server به OpenAI API ارسال می‌شوند. برای داده‌هایی که باید کاملاً local باقی بمانند Vision را فعال نکنید و `OPENAI_API_KEY` را هرگز در اختیار Agent یا Action client قرار ندهید.
 
 ‏`allowedDirectories` یک محدودیت سمت DesktopCommanderMCP است. برای isolation قوی‌تر، آن را با permissionهای filesystem سیستم‌عامل و یک service account اختصاصی روی کامپیوتر کنترل‌شونده ترکیب کنید.
 

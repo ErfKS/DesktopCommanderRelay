@@ -1,0 +1,279 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Desktop Commander Relay Actions",
+    "version": "0.1.0",
+    "description": "Authenticated REST actions for DesktopCommanderRelay, including explicit device routing and local-image analysis."
+  },
+  "servers": [
+    {
+      "url": "https://mcp-relay.katebsaber.ir"
+    }
+  ],
+  "paths": {
+    "/action/status": {
+      "get": {
+        "operationId": "getDesktopCommanderStatus",
+        "summary": "Get relay and device status",
+        "description": "Return connected devices, the selected device, and any current device-selection problem.",
+        "responses": {
+          "200": {
+            "description": "Relay status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/action/tools": {
+      "get": {
+        "operationId": "getDesktopCommanderTools",
+        "summary": "List or inspect Action-visible tools",
+        "description": "List Action-visible tools. Optionally select a device and request one full tool definition by name.",
+        "parameters": [
+          {
+            "name": "device_id",
+            "in": "query",
+            "required": false,
+            "description": "Explicit connected device for device-specific tool policy.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "required": false,
+            "description": "Optional exact tool name.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tool information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid device id"
+          },
+          "404": {
+            "description": "Device or tool not found"
+          }
+        }
+      }
+    },
+    "/action/tools/{name}/call": {
+      "post": {
+        "operationId": "callDesktopCommanderTool",
+        "summary": "Call a Desktop Commander tool",
+        "description": "Call an allowed tool. An explicit device_id takes precedence over the Relay default target.",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "description": "Desktop Commander tool name.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "device_id": {
+                    "type": "string",
+                    "description": "Optional explicit connected device."
+                  },
+                  "arguments": {
+                    "type": "object",
+                    "description": "Arguments passed to the selected Desktop Commander tool.",
+                    "additionalProperties": true
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Tool result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Tool not permitted"
+          },
+          "404": {
+            "description": "Tool not available"
+          },
+          "409": {
+            "description": "Target device unavailable"
+          },
+          "502": {
+            "description": "Agent or tool failure"
+          },
+          "504": {
+            "description": "Tool call timeout"
+          }
+        }
+      }
+    },
+    "/action/images/analyze": {
+      "post": {
+        "operationId": "analyzeDesktopCommanderImage",
+        "summary": "Analyze a local image",
+        "description": "Read an allowed image from an explicitly selected Vision-enabled device and return textual visual analysis.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "device_id",
+                  "path"
+                ],
+                "properties": {
+                  "device_id": {
+                    "type": "string",
+                    "description": "Explicit connected device allowed by ACTION_VISION_DEVICE_IDS."
+                  },
+                  "path": {
+                    "type": "string",
+                    "description": "Absolute local image path under /projects/ or /workspace/."
+                  },
+                  "prompt": {
+                    "type": "string",
+                    "description": "Optional instructions describing what to inspect in the image."
+                  },
+                  "detail": {
+                    "type": "string",
+                    "enum": [
+                      "low",
+                      "high",
+                      "auto"
+                    ],
+                    "default": "high",
+                    "description": "Vision image-detail level."
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Vision analysis result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok",
+                    "device_id",
+                    "path",
+                    "mime_type",
+                    "bytes",
+                    "model",
+                    "detail",
+                    "analysis"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "device_id": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "mime_type": {
+                      "type": "string"
+                    },
+                    "bytes": {
+                      "type": "integer"
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string",
+                      "enum": [
+                        "low",
+                        "high",
+                        "auto"
+                      ]
+                    },
+                    "analysis": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Device or path not permitted"
+          },
+          "404": {
+            "description": "Device not connected"
+          },
+          "413": {
+            "description": "Image exceeds the configured limit"
+          },
+          "415": {
+            "description": "Unsupported image input"
+          },
+          "429": {
+            "description": "Vision provider rate limit"
+          },
+          "502": {
+            "description": "Desktop Commander or Vision provider failure"
+          },
+          "503": {
+            "description": "Vision Bridge not configured"
+          },
+          "504": {
+            "description": "Vision request timeout"
+          }
+        }
+      }
+    }
+  }
+}

@@ -246,40 +246,70 @@ The Action API exposes these operations:
 | `GET` | `/action/status` | Returns connected devices, the selected device, and any device-selection problem. |
 | `GET` | `/action/tools` | Lists Action-visible DesktopCommander tools. |
 | `GET` | `/action/tools?name=<tool>` | Returns the full definition of one Action-visible tool. |
-| `POST` | `/action/tools/{name}/call` | Calls an allowed DesktopCommander tool on the selected agent. |
+| `POST` | `/action/tools/{name}/call` | Calls an allowed DesktopCommander tool. An explicit `device_id`, when supplied, takes precedence over the Relay default target. |
+| `POST` | `/action/images/analyze` | Reads an allowed local image from an explicitly selected Vision-enabled device and returns textual visual analysis plus image metadata. |
 
 Tool calls use this request shape:
 
 ```json
 {
+  "device_id": "home-pc-sandbox",
   "arguments": {
-    "path": "C:\\Users\\user\\Projects\\example.txt"
+    "path": "/projects/example/file.txt"
   }
 }
 ```
 
-The Action API uses the same server-side device-selection logic as the MCP path. `/action/status` can report multiple connected agents, but normal Action tool calls are still sent to the device selected by `TARGET_DEVICE_ID` or by the relay's single-device fallback behavior.
+`device_id` is optional for ordinary Action tool calls. When supplied, it takes precedence over `TARGET_DEVICE_ID` and the single-device fallback. Calls without `device_id` use the normal Relay selection rules. Process/session tools are stricter: they require an explicit `device_id` that is listed in `ACTION_SANDBOX_DEVICE_IDS`.
+
+### Vision Bridge
+
+`POST /action/images/analyze` is a dedicated image-analysis endpoint. It always requires an explicit `device_id`; there is no fallback to `TARGET_DEVICE_ID`.
+
+Example request:
+
+```json
+{
+  "device_id": "home-pc-sandbox",
+  "path": "/projects/example/.artifacts/preview.jpg",
+  "prompt": "Review the layout, typography, contrast, visual hierarchy, readability, and visible design problems.",
+  "detail": "high"
+}
+```
+
+The selected device must be listed in `ACTION_VISION_DEVICE_IDS`. The image path must be an absolute local Linux path under `/projects/` or `/workspace/` and must use one of these extensions: `.png`, `.jpg`, `.jpeg`, `.webp`, or `.gif`. URLs, Windows paths, parent-directory traversal, unsupported extensions, and unsupported image MIME types are rejected.
+
+The Relay reads the image through Desktop Commander with URL mode disabled, enforces a decoded image-size limit, and sends the image plus the analysis prompt to the OpenAI Responses API using the server-side `OPENAI_API_KEY`. The Action client receives only textual analysis and image metadata; the base64 image payload is not returned to the Custom GPT.
+
+Text or instructions visible inside the image are treated by the Vision Bridge as untrusted image content, not as commands to follow. Enabling this endpoint means the selected image and the supplied analysis prompt leave the controlled device and are processed by the configured OpenAI API account.
 
 ## ChatGPT Action tool policy
 
-The Action interface intentionally hides and rejects a set of DesktopCommander tools that could bypass filesystem restrictions or change the local policy.
+The Action interface applies an additional server-side policy before forwarding DesktopCommander tool calls.
 
-The following tools are currently blocked through `/action`:
+The following tools are always blocked through `/action`:
 
 ```text
 set_config_value
+kill_process
+```
+
+The following process/session tools are conditionally available:
+
+```text
 start_process
 interact_with_process
 read_process_output
 force_terminate
-kill_process
 ```
 
-Blocked tools are removed from `/action/tools`. A direct attempt to call one returns HTTP `403` with an error indicating that the tool is not permitted through ChatGPT Actions.
+These process/session tools require an explicit `device_id`, and that device must be present in `ACTION_SANDBOX_DEVICE_IDS`. Without an explicit allowed device they are hidden from `/action/tools`; a direct call returns HTTP `403`.
 
-This filtering applies only to the HTTP Action interface. It does not remove those tools from DesktopCommanderMCP itself and does not change what a separately authenticated MCP client may be able to access.
+`ACTION_SANDBOX_DEVICE_IDS` is a legacy variable name. Adding a device to it does **not** create a sandbox or any new isolation boundary. It authorizes Action process execution on that device with the permissions of the Relay Agent/DesktopCommander process. Only list devices on which that capability is intentional.
 
-The current policy is a blocklist. If you need a strict file-only security boundary, consider replacing it with an explicit server-side allowlist so newly added upstream DesktopCommander tools are not exposed automatically.
+This filtering applies only to the HTTP Action interface. It does not remove tools from DesktopCommanderMCP itself and does not reduce the capabilities of a separately authenticated MCP client.
+
+The remaining Action policy is not a closed per-tool allowlist. Review `/action/tools` after DesktopCommanderMCP upgrades so newly added upstream tools are not exposed unexpectedly.
 
 ## DesktopCommander filesystem restrictions
 
@@ -302,7 +332,7 @@ Important security notes:
 
 - An empty `allowedDirectories` list may mean unrestricted filesystem access depending on the DesktopCommanderMCP configuration semantics. Verify the local configuration before exposing a remote client.
 - The Action API blocks `set_config_value`, so a ChatGPT Action client cannot remove or expand `allowedDirectories` through the current Action adapter.
-- The Action API also blocks terminal/process execution tools listed above so they cannot be used through Actions to trivially bypass a filesystem-only path restriction.
+- Process/session tools are available through Actions only when the caller supplies an explicit `device_id` listed in `ACTION_SANDBOX_DEVICE_IDS`. Do not add a device to that list unless process execution on that device is intended.
 - These restrictions do not automatically constrain a separate direct/local DesktopCommander client that has broader tool access.
 - Operating-system permissions are a stronger final boundary. For high-assurance deployments, run the agent/DesktopCommander process under a dedicated OS account with access only to the directories it actually needs.
 
@@ -333,6 +363,14 @@ The server and agent should use separate environment files. Never commit real cr
 | `AGENT_WS_PATH` | `/agent` | Agent WebSocket route. |
 | `MCP_API_KEY` | Required unless insecure loopback mode is enabled | Bearer token for MCP HTTP requests. |
 | `ACTION_API_KEY` | Required when exposing the Action API publicly | Independent Bearer token for `/action/*`. Do not reuse `MCP_API_KEY` or `AGENT_TOKEN`. |
+| `ACTION_SANDBOX_DEVICE_IDS` | Empty by default | Comma-separated device IDs allowed to use Action process/session tools when an explicit `device_id` is supplied. Despite the legacy name, membership does not itself provide sandboxing. |
+| `ACTION_VISION_DEVICE_IDS` | Empty by default | Comma-separated device IDs permitted to use `/action/images/analyze`. The endpoint always requires an explicit `device_id`. |
+| `OPENAI_API_KEY` | Required only for Vision Bridge | Server-side OpenAI API credential used for image analysis. Keep it out of Git, Action schemas, Agent environments, and client configuration. |
+| `VISION_MODEL` | `gpt-5.6` | Model used by the Vision Bridge. |
+| `VISION_MAX_IMAGE_BYTES` | `5242880` | Maximum decoded image size accepted by the Vision Bridge. |
+| `VISION_MAX_PROMPT_CHARS` | `12000` | Maximum Vision analysis prompt length. |
+| `VISION_MAX_OUTPUT_TOKENS` | `4000` | Maximum output tokens requested from the Vision model. |
+| `VISION_OPENAI_TIMEOUT_MS` | `60000` | Timeout for the OpenAI Vision request. |
 | `AGENT_TOKEN` | Required unless insecure loopback mode is enabled | Independent Bearer token for agent WebSocket connections. |
 | `TARGET_DEVICE_ID` | Optional | Selects one connected device. With no target, one connected device is selected automatically. |
 | `MCP_ALLOWED_HOSTS` | `localhost,127.0.0.1,[::1]` when unset; required for a public bind | Comma-separated hostnames, without scheme or port. |
@@ -373,7 +411,9 @@ The server can track multiple connected agents, but normal DesktopCommanderMCP t
 - If `TARGET_DEVICE_ID` is offline, normal DesktopCommanderMCP tools are unavailable until it reconnects.
 - `relay_status` and `relay_list_devices` are always exposed by the MCP relay for status and device discovery.
 - `/action/status` reports the connected devices and selected device to Action clients.
-- The current Action call endpoint does not accept a per-request `device_id`; it uses the server-selected device.
+- Ordinary Action tool calls may supply a per-request `device_id`; an explicit device takes precedence over `TARGET_DEVICE_ID` and the single-device fallback.
+- Action process/session tools require an explicit device listed in `ACTION_SANDBOX_DEVICE_IDS`.
+- `/action/images/analyze` requires an explicit device listed in `ACTION_VISION_DEVICE_IDS` and never falls back to the server-selected device.
 
 ## Security
 
@@ -385,7 +425,9 @@ Anyone with `MCP_API_KEY` can call tools exposed by the selected connected agent
 
 Anyone with `ACTION_API_KEY` can use the tools exposed by `/action/tools`. The Action adapter currently applies its own server-side tool filter and rejects the blocked tools documented above. This Action-specific filter does not modify DesktopCommanderMCP itself.
 
-Treat the Action API as a powerful remote-control interface even when process tools are blocked. Remaining tools may still read, create, modify, move, search, or inspect files inside locally permitted directories. Some DesktopCommander tools may also have non-filesystem behavior; review the visible tool list before granting an Action key to a client.
+Treat the Action API as a powerful remote-control interface. Process/session tools may be enabled for explicitly authorized devices, and the remaining tools may still read, create, modify, move, search, or inspect files inside locally permitted directories. Some DesktopCommander tools may also have non-filesystem behavior; review the visible tool list before granting an Action key to a client.
+
+When Vision Bridge is enabled, the selected image and Vision prompt are sent from the Relay Server to the OpenAI API. Do not enable Vision for data that must remain entirely local, and never expose `OPENAI_API_KEY` to an Agent or Action client.
 
 `allowedDirectories` is a DesktopCommanderMCP-side restriction. For stronger isolation, combine it with operating-system filesystem permissions and a dedicated service account on the controlled machine.
 

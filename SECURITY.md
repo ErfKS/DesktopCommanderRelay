@@ -7,6 +7,7 @@ DesktopCommanderRelay exposes a local DesktopCommanderMCP instance to remote cli
 - Use HTTPS/WSS. Do not expose the raw Node HTTP listener directly to the Internet.
 - Keep `MCP_API_KEY`, `ACTION_API_KEY`, and `AGENT_TOKEN` different, random, and outside source control. At least 256 bits of entropy is recommended for each.
 - Keep `.env` and agent environment files outside source control and readable only by the service account.
+- If Vision Bridge is enabled, keep `OPENAI_API_KEY` only on the Relay Server. Never pass it to Relay Agents or Action clients.
 - Bind Node to loopback when a reverse proxy runs on the same host.
 - Keep Desktop Commander's own `allowedDirectories`, blocked commands, and related local security settings configured conservatively.
 - Do not enable `ALLOW_INSECURE_LOCAL` on a public deployment.
@@ -22,6 +23,7 @@ DesktopCommanderRelay uses separate credentials for separate interfaces:
 - `MCP_API_KEY` authenticates remote MCP requests to `/mcp`.
 - `ACTION_API_KEY` authenticates HTTP Action requests to `/action/*`.
 - `AGENT_TOKEN` authenticates Relay Agents connecting over WebSocket.
+- `OPENAI_API_KEY`, when Vision Bridge is enabled, authenticates outbound Vision requests from the Relay Server to OpenAI. It is not a Relay client credential.
 
 Do not reuse one credential for another interface.
 
@@ -37,22 +39,20 @@ Use a separate relay deployment or a dedicated authorization layer when differen
 
 The HTTP Action interface applies an additional server-side tool policy before forwarding calls to DesktopCommanderMCP.
 
-The following tools are currently hidden from `/action/tools` and rejected when called directly through `/action`:
+The following tools are always hidden from `/action/tools` and rejected when called directly through `/action`:
 
 ```text
 set_config_value
-start_process
-interact_with_process
-read_process_output
-force_terminate
 kill_process
 ```
 
-A blocked Action call returns HTTP `403`.
+The process/session tools `start_process`, `interact_with_process`, `read_process_output`, and `force_terminate` are conditionally available. They require an explicit `device_id` listed in `ACTION_SANDBOX_DEVICE_IDS`. On any other device, or when no explicit device is supplied, they are hidden and direct calls return HTTP `403`.
 
-This filtering applies only to the HTTP Action interface. It does not remove those tools from DesktopCommanderMCP and does not reduce the capabilities of a separately authenticated MCP client.
+`ACTION_SANDBOX_DEVICE_IDS` is an authorization list only. The name is legacy: placing a host in this list does not sandbox it or create isolation. It authorizes Action process execution with the permissions of the Relay Agent/DesktopCommander account on that device.
 
-The current Action policy is a blocklist. For stricter deployments, prefer an explicit allowlist so newly added upstream DesktopCommander tools are not exposed automatically.
+This filtering applies only to the HTTP Action interface. It does not remove tools from DesktopCommanderMCP and does not reduce the capabilities of a separately authenticated MCP client.
+
+The remaining Action policy is not a closed per-tool allowlist. For stricter deployments, prefer an explicit allowlist and review `/action/tools` after DesktopCommanderMCP upgrades.
 
 ## Filesystem restrictions
 
@@ -64,15 +64,31 @@ Important considerations:
 
 - Verify the semantics of an empty `allowedDirectories` list before exposing a remote client; depending on DesktopCommanderMCP configuration, an empty list may mean unrestricted filesystem access.
 - The current Action API blocks `set_config_value`, so an Action client cannot remove or expand `allowedDirectories` through the Action adapter.
-- The current Action API also blocks terminal/process execution tools listed above so they cannot trivially bypass filesystem-only path restrictions through Actions.
+- Process/session tools are permitted only for an explicit `device_id` present in `ACTION_SANDBOX_DEVICE_IDS`. Treat every device in that list as process-execution-enabled.
 - These protections do not automatically constrain a separate local or MCP client that has broader DesktopCommander tool access.
 - Operating-system permissions are a stronger final boundary. For high-assurance deployments, run the Relay Agent/DesktopCommander process under a dedicated OS account with access only to the directories it requires.
+
+## Vision Bridge
+
+`POST /action/images/analyze` is authenticated by `ACTION_API_KEY` and additionally requires an explicit `device_id` listed in `ACTION_VISION_DEVICE_IDS`. It does not fall back to `TARGET_DEVICE_ID`.
+
+Vision Bridge applies additional input restrictions:
+
+- Image paths must be absolute local Linux paths under `/projects/` or `/workspace/`.
+- URL input, Windows paths, parent-directory traversal, unsupported extensions, and unsupported image MIME types are rejected.
+- Desktop Commander's `read_file` tool is called with URL mode explicitly disabled.
+- The decoded image is size-limited before it is sent upstream.
+- Text or instructions visible inside the image are treated as untrusted image content rather than commands for the bridge to follow.
+
+The image content and Vision prompt are sent to the OpenAI API using the server-side `OPENAI_API_KEY`. Do not enable Vision Bridge for data that must remain entirely local. Keep `OPENAI_API_KEY` only on the Relay Server; never place it in an Agent environment, Custom GPT schema, client configuration, or source control.
+
+Filesystem mounts, DesktopCommander restrictions, and operating-system permissions still apply. Vision Bridge does not grant access to a file the selected Agent cannot read.
 
 ## Device selection
 
 The server can track multiple connected agents.
 
-Normal tool calls use the device selected by `TARGET_DEVICE_ID`, or the relay's single-device fallback when only one agent is connected.
+Normal MCP tool calls and Action tool calls without an explicit `device_id` use the device selected by `TARGET_DEVICE_ID`, or the Relay's single-device fallback when only one agent is connected. An explicit Action `device_id` takes precedence for ordinary Action tool calls. Process/session Action tools and Vision analysis additionally require their respective device allowlists.
 
 `/action/status`, `relay_status`, and `relay_list_devices` may reveal connected-device metadata to authenticated clients. Do not treat device names or IDs as secrets, but avoid placing sensitive information in them.
 
@@ -84,7 +100,8 @@ Avoid adding debug logging that records:
 
 - Bearer tokens or environment secrets
 - tool arguments or full tool results
-- file contents
+- file contents or image payloads
+- Vision prompts or full Vision responses when they may contain sensitive data
 - command output containing credentials or private data
 
 ## Operational guidance
