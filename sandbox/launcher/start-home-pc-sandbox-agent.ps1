@@ -3,7 +3,74 @@ $ErrorActionPreference = "Stop"
 $RelayDir = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $ConfigFile = Join-Path $PSScriptRoot "sandbox-mounts.txt"
 $ExampleConfigFile = Join-Path $PSScriptRoot "sandbox-mounts.example.txt"
+$AgentEnvFile = Join-Path $PSScriptRoot "agent.env"
 $Image = "desktop-commander-dev-sandbox:latest"
+
+function Import-AgentEnvFile {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $Path
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "Agent credential file not found: $Path"
+    }
+
+    $AllowedKeys = @(
+        "RELAY_WS_URL",
+        "AGENT_TOKEN"
+    )
+
+    foreach ($RawLine in Get-Content -LiteralPath $Path) {
+        $Line = ($RawLine -replace "^\uFEFF", "").Trim()
+
+        if ([string]::IsNullOrWhiteSpace($Line)) {
+            continue
+        }
+
+        if ($Line.StartsWith("#")) {
+            continue
+        }
+
+        $EqualsIndex = $Line.IndexOf("=")
+
+        if ($EqualsIndex -le 0) {
+            continue
+        }
+
+        $Key = $Line.Substring(0, $EqualsIndex).Trim()
+        $Value = $Line.Substring($EqualsIndex + 1).Trim()
+
+        if ($Key -notin $AllowedKeys) {
+            continue
+        }
+
+        if (
+            $Value.Length -ge 2 -and
+            (
+                ($Value.StartsWith('"') -and $Value.EndsWith('"')) -or
+                ($Value.StartsWith("'") -and $Value.EndsWith("'"))
+            )
+        ) {
+            $Value = $Value.Substring(1, $Value.Length - 2)
+        }
+
+        Set-Item -Path "Env:$Key" -Value $Value
+    }
+
+    foreach ($RequiredKey in $AllowedKeys) {
+        $Value = [Environment]::GetEnvironmentVariable(
+            $RequiredKey,
+            "Process"
+        )
+
+        if ([string]::IsNullOrWhiteSpace($Value)) {
+            throw "Missing required agent credential: $RequiredKey"
+        }
+    }
+}
+
+Import-AgentEnvFile -Path $AgentEnvFile
 
 if (-not (Test-Path $ConfigFile)) {
     if (-not (Test-Path $ExampleConfigFile)) {

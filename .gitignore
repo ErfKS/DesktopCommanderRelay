@@ -20,3 +20,4 @@ Thumbs.db
 
 DesktopCommanderRelay-*.zip
 /sandbox/launcher/sandbox-mounts.txt
+/sandbox/launcher/agent.env
