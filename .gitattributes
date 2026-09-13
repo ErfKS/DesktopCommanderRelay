@@ -1,0 +1,5 @@
+/sandbox/Dockerfile text eol=lf
+/sandbox/*.sh text eol=lf
+/sandbox/*.ps1 text eol=crlf
+/sandbox/launcher/*.ps1 text eol=crlf
+/sandbox/launcher/*.bat text eol=crlf

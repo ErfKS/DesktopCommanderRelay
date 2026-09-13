@@ -1,0 +1,12 @@
+# Desktop Commander Sandbox mounts
+#
+# One project per line:
+# %USERPROFILE%\PhpstormProjects\MyProject
+#
+# Read only:
+# %USERPROFILE%\PhpstormProjects\LegacyProject|ro
+#
+# Custom container path:
+# %USERPROFILE%\Documents\AI-Work|/workspace|rw
+
+%USERPROFILE%\Documents\AI-Work|/workspace|rw

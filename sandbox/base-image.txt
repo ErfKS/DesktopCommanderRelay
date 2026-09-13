@@ -1,0 +1,1 @@
+mcp/desktop-commander@sha256:5df787069e37bbed40b0dd41d4b3589ddd1c1530589efa0b3e41abc833974068
