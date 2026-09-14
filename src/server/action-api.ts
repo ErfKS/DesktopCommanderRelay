@@ -295,10 +295,6 @@ export function createActionRouter(
         body: req.body,
       });
       console.error(
-          '[ACTION RAW HEADERS]',
-          JSON.stringify(req.headers, null, 2)
-      );
-      console.error(
           '[ACTION RAW BODY TYPE]',
           typeof req.body,
           Array.isArray(req.body)
@@ -375,6 +371,17 @@ export function createActionRouter(
           args = { ...req.body };
           delete args.device_id;
         }
+      }
+
+      // Normalize common Desktop Commander argument aliases
+      if (name === 'read_file' && !args.path && args.file_path) {
+        args.path = args.file_path;
+        delete args.file_path;
+      }
+
+      if (name === 'read_multiple_files' && !args.paths && args.file_paths) {
+        args.paths = args.file_paths;
+        delete args.file_paths;
       }
 
       try {
