@@ -294,6 +294,15 @@ export function createActionRouter(
         params: req.params,
         body: req.body,
       });
+      console.error(
+          '[ACTION RAW HEADERS]',
+          JSON.stringify(req.headers, null, 2)
+      );
+      console.error(
+          '[ACTION RAW BODY TYPE]',
+          typeof req.body,
+          Array.isArray(req.body)
+      );
 
       const name = req.params.name?.trim();
 
