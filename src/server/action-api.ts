@@ -288,6 +288,13 @@ export function createActionRouter(
       type: ['application/json', 'application/*+json'],
     }),
     async (req, res) => {
+      console.error('[ACTION CALL ENTERED]', {
+        method: req.method,
+        path: req.path,
+        params: req.params,
+        body: req.body,
+      });
+
       const name = req.params.name?.trim();
 
       if (!name || name.length > 200) {
