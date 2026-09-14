@@ -320,6 +320,18 @@ export function createActionRouter(
         return;
       }
 
+      console.error(
+          '[action-debug] incoming body:',
+          JSON.stringify(req.body, null, 2),
+      );
+
+      console.error(
+          '[action-debug] tool:',
+          name,
+          'device:',
+          deviceId,
+      );
+
       let args: JsonObject = {};
 
       if (req.body !== undefined && req.body !== null) {
