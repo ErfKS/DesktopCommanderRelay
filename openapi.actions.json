@@ -31,6 +31,118 @@
         }
       }
     },
+    "/action/capture_screenshot": {
+      "post": {
+        "operationId": "captureDesktopCommanderScreenshot",
+        "summary": "Capture a temporary device screenshot",
+        "description": "Capture a screenshot on an explicitly selected allowlisted device. The response contains a tokenized temporary image URL that expires after the configured Image Bridge TTL (24 hours by default).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Temporary screenshot URL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemporaryImageResponse"
+                }
+              }
+            }
+          },
+          "400": { "description": "Invalid request" },
+          "403": { "description": "Device is not allowlisted" },
+          "404": { "description": "Device is not connected" },
+          "409": { "description": "Screenshot capture is unavailable" },
+          "413": { "description": "Screenshot exceeds the configured limit" },
+          "502": { "description": "Screenshot provider failure" }
+        }
+      }
+    },
+    "/action/upload_device_image": {
+      "post": {
+        "operationId": "uploadDesktopCommanderDeviceImage",
+        "summary": "Create a temporary URL for a device image",
+        "description": "Read an image from an explicitly selected allowlisted device through Desktop Commander, store it temporarily on the Relay, and return a tokenized URL. Paths are limited to configured image roots and image extensions.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["device_id", "path"],
+                "properties": {
+                  "device_id": { "type": "string" },
+                  "path": {
+                    "type": "string",
+                    "description": "Absolute POSIX image path under IMAGE_BRIDGE_ALLOWED_ROOTS. Parent-directory traversal and URLs are rejected."
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Temporary image URL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemporaryImageResponse"
+                }
+              }
+            }
+          },
+          "400": { "description": "Invalid request" },
+          "403": { "description": "Device or path is not permitted" },
+          "404": { "description": "Device is not connected" },
+          "413": { "description": "Image exceeds the configured limit" },
+          "415": { "description": "Unsupported image input" },
+          "502": { "description": "Desktop Commander failure" }
+        }
+      }
+    },
+    "/i/{token}.{extension}": {
+      "get": {
+        "operationId": "getTemporaryRelayImage",
+        "summary": "Fetch a temporary Relay image",
+        "description": "Fetch an image using the unguessable token returned by an Image Bridge action. The token stops working after expiry or cleanup.",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$" }
+          },
+          {
+            "name": "extension",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "enum": ["png", "jpg", "jpeg", "webp", "gif"] }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Temporary image",
+            "content": {
+              "image/png": {},
+              "image/jpeg": {},
+              "image/webp": {},
+              "image/gif": {}
+            }
+          },
+          "404": { "description": "Image not found or expired" }
+        }
+      }
+    },
     "/action/tools": {
       "get": {
         "operationId": "getDesktopCommanderTools",
@@ -273,6 +385,32 @@
             "description": "Vision request timeout"
           }
         }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "DeviceRequest": {
+        "type": "object",
+        "required": ["device_id"],
+        "properties": {
+          "device_id": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "TemporaryImageResponse": {
+        "type": "object",
+        "required": ["success", "ok", "device_id", "image_url", "expires_at", "bytes", "mime_type"],
+        "properties": {
+          "success": { "type": "boolean" },
+          "ok": { "type": "boolean" },
+          "device_id": { "type": "string" },
+          "image_url": { "type": "string", "format": "uri" },
+          "expires_at": { "type": "string", "format": "date-time" },
+          "bytes": { "type": "integer", "minimum": 1 },
+          "mime_type": { "type": "string" }
+        },
+        "additionalProperties": false
       }
     }
   }

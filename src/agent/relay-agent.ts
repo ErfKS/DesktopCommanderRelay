@@ -1,8 +1,18 @@
 import os from 'node:os';
 import WebSocket from 'ws';
 import { LocalDesktopCommander } from './local-desktop-commander.js';
+import { captureLinuxScreenshot } from './screenshot.js';
 import { envInt, envOptional, envString } from '../shared/env.js';
-import { isJsonObject, MAX_CALL_ID_LENGTH, MAX_TOOL_NAME_LENGTH, type ToolCallMessage, type ToolDefinition, type ToolResultMessage } from '../shared/protocol.js';
+import {
+  isJsonObject,
+  MAX_CALL_ID_LENGTH,
+  MAX_TOOL_NAME_LENGTH,
+  RELAY_CAPTURE_SCREENSHOT_TOOL,
+  RELAY_CAPTURE_SCREENSHOT_TOOL_DEFINITION,
+  type ToolCallMessage,
+  type ToolDefinition,
+  type ToolResultMessage,
+} from '../shared/protocol.js';
 import { normalizeDeviceId } from '../shared/security.js';
 import { RELAY_PROTOCOL_VERSION, RELAY_VERSION } from '../shared/version.js';
 
@@ -58,7 +68,7 @@ export class RelayAgent {
   }
 
   private async connectOnce(): Promise<void> {
-    const tools = await this.local.listTools();
+    const tools = await this.listRelayTools();
     console.error(`[agent] connecting to relay ${this.relayUrl} as '${this.deviceId}' with ${tools.length} tools`);
 
     await new Promise<void>((resolve, reject) => {
@@ -146,7 +156,9 @@ export class RelayAgent {
   private async executeCall(call: ToolCallMessage): Promise<ToolResultMessage> {
     let message: ToolResultMessage;
     try {
-      const result = await this.local.callTool(call.name, call.arguments, call.metadata ?? {});
+      const result = call.name === RELAY_CAPTURE_SCREENSHOT_TOOL
+        ? await captureLinuxScreenshot(readScreenshotLimit(call.arguments))
+        : await this.local.callTool(call.name, call.arguments, call.metadata ?? {});
       message = { type: 'tool_result', id: call.id, ok: true, result };
     } catch (error) {
       message = {
@@ -221,11 +233,19 @@ export class RelayAgent {
   private async refreshTools(socket: WebSocket): Promise<void> {
     if (socket !== this.socket || socket.readyState !== WebSocket.OPEN) return;
     try {
-      const tools = await this.local.listTools();
+      const tools = await this.listRelayTools();
       if (socket === this.socket && socket.readyState === WebSocket.OPEN) this.sendHello(socket, tools);
     } catch (error) {
       console.error('[agent] local tool refresh failed:', error instanceof Error ? error.message : String(error));
     }
+  }
+
+  private async listRelayTools(): Promise<ToolDefinition[]> {
+    const tools = await this.local.listTools();
+    return [
+      ...tools.filter((tool) => tool.name !== RELAY_CAPTURE_SCREENSHOT_TOOL),
+      RELAY_CAPTURE_SCREENSHOT_TOOL_DEFINITION,
+    ];
   }
 
   private dropQueuedCalls(socket: WebSocket): void {
@@ -267,4 +287,13 @@ function parseToolCall(value: Record<string, unknown>): ToolCallMessage {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function readScreenshotLimit(args: Record<string, unknown>): number {
+  const value = args.max_bytes;
+  if (value === undefined) return 10 * 1024 * 1024;
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) {
+    throw new Error('Invalid screenshot size limit');
+  }
+  return value;
 }

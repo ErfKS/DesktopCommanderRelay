@@ -9,6 +9,7 @@ export const MAX_TOOL_NAME_LENGTH = 200;
 export const MAX_TOOL_COUNT = 1_000;
 export const MAX_CALL_ID_LENGTH = 200;
 export const MAX_ERROR_LENGTH = 4_000;
+export const RELAY_CAPTURE_SCREENSHOT_TOOL = 'relay_capture_screenshot';
 
 export interface ToolDefinition {
   name: string;
@@ -19,6 +20,18 @@ export interface ToolDefinition {
   annotations?: JsonObject;
   _meta?: JsonObject;
 }
+
+export const RELAY_CAPTURE_SCREENSHOT_TOOL_DEFINITION: ToolDefinition = {
+  name: RELAY_CAPTURE_SCREENSHOT_TOOL,
+  description: 'Internal Relay image bridge screenshot capture capability.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      max_bytes: { type: 'integer', minimum: 1 },
+    },
+    additionalProperties: false,
+  },
+};
 
 export interface AgentHelloMessage {
   type: 'hello';

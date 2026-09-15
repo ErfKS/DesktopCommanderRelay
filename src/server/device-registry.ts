@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import WebSocket from 'ws';
-import type { JsonObject, ToolDefinition, ToolResultMessage } from '../shared/protocol.js';
+import { RELAY_CAPTURE_SCREENSHOT_TOOL, type JsonObject, type ToolDefinition, type ToolResultMessage } from '../shared/protocol.js';
 
 export interface RegisteredDevice {
   id: string;
@@ -17,7 +17,11 @@ interface PendingCall {
   timer: NodeJS.Timeout;
 }
 
-const RESERVED_TOOLS = new Set(['relay_status', 'relay_list_devices']);
+const RESERVED_TOOLS = new Set([
+  'relay_status',
+  'relay_list_devices',
+  RELAY_CAPTURE_SCREENSHOT_TOOL,
+]);
 
 export class DeviceRegistry {
   private readonly devices = new Map<string, RegisteredDevice>();

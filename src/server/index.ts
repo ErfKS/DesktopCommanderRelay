@@ -6,6 +6,7 @@ import { DeviceRegistry } from './device-registry.js';
 import { AgentWebSocketServer } from './ws-agent-server.js';
 import { createMcpRequestHandler } from './mcp.js';
 import { createActionRouter } from './action-api.js';
+import { createImageBridgeFromEnv } from './image-bridge.js';
 import { envBool, envInt, envOptional, envString, splitCsv } from '../shared/env.js';
 import { normalizeDeviceId } from '../shared/security.js';
 import { RELAY_VERSION } from '../shared/version.js';
@@ -20,6 +21,7 @@ const mcpApiKey = envOptional('MCP_API_KEY');
 const agentToken = envOptional('AGENT_TOKEN');
 const actionApiKey = envOptional('ACTION_API_KEY');
 const actionPath = envString('ACTION_PATH', '/action');
+const imagePublicBaseUrl = envOptional('IMAGE_BRIDGE_PUBLIC_BASE_URL');
 const targetDeviceId = envOptional('TARGET_DEVICE_ID') ? normalizeDeviceId(envString('TARGET_DEVICE_ID')) : undefined;
 const callTimeoutMs = envInt('TOOL_CALL_TIMEOUT_MS', 300_000, 1_000);
 const wsMaxPayload = envInt('WS_MAX_PAYLOAD_BYTES', 32 * 1024 * 1024, 1024);
@@ -45,6 +47,8 @@ if (publicHost && configuredHosts.length === 0) {
 }
 
 const registry = new DeviceRegistry(targetDeviceId, callTimeoutMs, maxPendingCalls);
+const imageBridge = createImageBridgeFromEnv(registry);
+await imageBridge.start();
 const app = express();
 app.disable('x-powered-by');
 app.use((_req, res, next) => {
@@ -57,6 +61,24 @@ app.get('/healthz', (_req, res) => {
   res.json({ ok: true, version: RELAY_VERSION, devices: registry.listDevices().length });
 });
 
+app.get('/i/:token.:extension', async (req, res) => {
+  try {
+    const image = await imageBridge.serve(req.params.token, req.params.extension);
+    if (!image) {
+      res.status(404).json({ error: 'Image not found or expired' });
+      return;
+    }
+    res.setHeader('Content-Type', image.mimeType);
+    res.setHeader('Content-Length', image.data.byteLength);
+    res.setHeader('Content-Disposition', 'inline');
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.send(image.data);
+  } catch (error) {
+    console.error('[relay] image bridge serving failed:', error instanceof Error ? error.message : String(error));
+    res.status(404).json({ error: 'Image not found or expired' });
+  }
+});
+
 app.use(
   actionPath,
   createActionRouter(
@@ -64,6 +86,8 @@ app.use(
     actionApiKey,
     allowInsecureLocal,
     httpBodyLimit,
+    imageBridge,
+    imagePublicBaseUrl,
   ),
 );
 
@@ -112,6 +136,7 @@ async function shutdown(signal: string): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
   console.error(`[relay] ${signal}: shutting down`);
+  await imageBridge.close().catch(() => undefined);
   registry.close();
   await agentServer.close().catch(() => undefined);
   await new Promise<void>((resolve) => httpServer.close(() => resolve()));

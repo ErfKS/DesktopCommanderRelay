@@ -248,6 +248,8 @@ The Action API exposes these operations:
 | `GET` | `/action/tools?name=<tool>` | Returns the full definition of one Action-visible tool. |
 | `POST` | `/action/tools/{name}/call` | Calls an allowed DesktopCommander tool. An explicit `device_id`, when supplied, takes precedence over the Relay default target. |
 | `POST` | `/action/images/analyze` | Reads an allowed local image from an explicitly selected Vision-enabled device and returns textual visual analysis plus image metadata. |
+| `POST` | `/action/capture_screenshot` | Captures a temporary screenshot on an explicitly selected Image Bridge device and returns a tokenized URL. |
+| `POST` | `/action/upload_device_image` | Reads an allowed image from an explicitly selected device and returns a tokenized temporary URL. |
 
 Tool calls use this request shape:
 
@@ -282,6 +284,12 @@ The selected device must be listed in `ACTION_VISION_DEVICE_IDS`. The image path
 The Relay reads the image through Desktop Commander with URL mode disabled, enforces a decoded image-size limit, and sends the image plus the analysis prompt to the OpenAI Responses API using the server-side `OPENAI_API_KEY`. The Action client receives only textual analysis and image metadata; the base64 image payload is not returned to the Custom GPT.
 
 Text or instructions visible inside the image are treated by the Vision Bridge as untrusted image content, not as commands to follow. Enabling this endpoint means the selected image and the supplied analysis prompt leave the controlled device and are processed by the configured OpenAI API account.
+
+### Temporary Image Bridge
+
+`POST /action/capture_screenshot` requires an explicit device listed in `ACTION_IMAGE_DEVICE_IDS`. On Linux relay agents it uses the first available screenshot utility (`gnome-screenshot`, `scrot`, `grim`, `maim`, ImageMagick, or `spectacle`) and returns an image URL such as `https://relay.example.com/i/<token>.png`.
+
+`POST /action/upload_device_image` requires the same explicit device allowlist and a local image path under `IMAGE_BRIDGE_ALLOWED_ROOTS`. The Relay reads the image through Desktop Commander with URL mode disabled, stores only a temporary copy, and never includes the source path in the response. Both endpoints use the existing Action Bearer authentication and return `expires_at`; the default TTL is 24 hours. `GET /i/<token>.<extension>` is authorized by the unguessable token and returns 404 after expiry or cleanup.
 
 ## ChatGPT Action tool policy
 
@@ -365,6 +373,13 @@ The server and agent should use separate environment files. Never commit real cr
 | `ACTION_API_KEY` | Required when exposing the Action API publicly | Independent Bearer token for `/action/*`. Do not reuse `MCP_API_KEY` or `AGENT_TOKEN`. |
 | `ACTION_SANDBOX_DEVICE_IDS` | Empty by default | Comma-separated device IDs allowed to use Action process/session tools when an explicit `device_id` is supplied. Despite the legacy name, membership does not itself provide sandboxing. |
 | `ACTION_VISION_DEVICE_IDS` | Empty by default | Comma-separated device IDs permitted to use `/action/images/analyze`. The endpoint always requires an explicit `device_id`. |
+| `ACTION_IMAGE_DEVICE_IDS` | Empty by default | Comma-separated device IDs permitted to use `/action/capture_screenshot` and `/action/upload_device_image`. Both endpoints require an explicit `device_id`. |
+| `IMAGE_BRIDGE_ALLOWED_ROOTS` | `/projects,/workspace` | Comma-separated absolute POSIX roots allowed for device-image paths. Keep this list narrow and aligned with DesktopCommander allowed directories. |
+| `IMAGE_BRIDGE_STORAGE_DIR` | `./tmp/image-bridge` | Relay-local directory for temporary image files. It is created with restrictive permissions. |
+| `IMAGE_BRIDGE_MAX_BYTES` | `10485760` | Maximum decoded image size stored by the Image Bridge. |
+| `IMAGE_BRIDGE_TTL_MS` | `86400000` | Temporary image lifetime; the default is 24 hours. |
+| `IMAGE_BRIDGE_CLEANUP_INTERVAL_MS` | `900000` | Cleanup interval for expired image files. Expired files are also removed during startup. |
+| `IMAGE_BRIDGE_PUBLIC_BASE_URL` | Derived from the request host | Public HTTPS base URL used in returned image URLs. Set this behind a reverse proxy to avoid relying on forwarded host/protocol headers. |
 | `OPENAI_API_KEY` | Required only for Vision Bridge | Server-side OpenAI API credential used for image analysis. Keep it out of Git, Action schemas, Agent environments, and client configuration. |
 | `VISION_MODEL` | `gpt-5.6` | Model used by the Vision Bridge. |
 | `VISION_MAX_IMAGE_BYTES` | `5242880` | Maximum decoded image size accepted by the Vision Bridge. |
@@ -414,6 +429,7 @@ The server can track multiple connected agents, but normal DesktopCommanderMCP t
 - Ordinary Action tool calls may supply a per-request `device_id`; an explicit device takes precedence over `TARGET_DEVICE_ID` and the single-device fallback.
 - Action process/session tools require an explicit device listed in `ACTION_SANDBOX_DEVICE_IDS`.
 - `/action/images/analyze` requires an explicit device listed in `ACTION_VISION_DEVICE_IDS` and never falls back to the server-selected device.
+- `/action/capture_screenshot` and `/action/upload_device_image` require an explicit device listed in `ACTION_IMAGE_DEVICE_IDS` and never fall back to the server-selected device.
 
 ## Security
 
@@ -428,6 +444,8 @@ Anyone with `ACTION_API_KEY` can use the tools exposed by `/action/tools`. The A
 Treat the Action API as a powerful remote-control interface. Process/session tools may be enabled for explicitly authorized devices, and the remaining tools may still read, create, modify, move, search, or inspect files inside locally permitted directories. Some DesktopCommander tools may also have non-filesystem behavior; review the visible tool list before granting an Action key to a client.
 
 When Vision Bridge is enabled, the selected image and Vision prompt are sent from the Relay Server to the OpenAI API. Do not enable Vision for data that must remain entirely local, and never expose `OPENAI_API_KEY` to an Agent or Action client.
+
+The Image Bridge stores a bounded temporary copy on the Relay only. Its token is generated with cryptographically secure random bytes, source paths are not exposed, image paths are lexically restricted to configured roots, and cleanup runs both on startup and periodically. DesktopCommanderMCP remains the device-side filesystem permission boundary.
 
 `allowedDirectories` is a DesktopCommanderMCP-side restriction. For stronger isolation, combine it with operating-system filesystem permissions and a dedicated service account on the controlled machine.
 

@@ -7,6 +7,12 @@ import {
   createVisionBridgeFromEnv,
   VisionBridgeError,
 } from './vision-bridge.js';
+import {
+  createImageBridgeFromEnv,
+  ImageBridge,
+  ImageBridgeError,
+  imageUrlForRequest,
+} from './image-bridge.js';
 
 function isJsonObject(value: unknown): value is JsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -76,6 +82,8 @@ export function createActionRouter(
   actionApiKey: string | undefined,
   allowInsecureLocal: boolean,
   httpBodyLimit: string,
+  imageBridge: ImageBridge = createImageBridgeFromEnv(registry),
+  publicBaseUrl?: string,
 ) {
   const router = express.Router();
   const sandboxDeviceIds = parseSandboxDeviceIds(
@@ -102,6 +110,92 @@ export function createActionRouter(
       devices: registry.listDevices(),
     });
   });
+
+  router.post(
+    '/capture_screenshot',
+    express.json({
+      limit: httpBodyLimit,
+      type: ['application/json', 'application/*+json'],
+    }),
+    async (req, res) => {
+      if (!isJsonObject(req.body)) {
+        res.status(400).json({ success: false, ok: false, error: 'Request body must be a JSON object' });
+        return;
+      }
+
+      let deviceId: string | undefined;
+      try {
+        deviceId = parseOptionalDeviceId(req.body.device_id);
+      } catch {
+        res.status(400).json({ success: false, ok: false, error: 'Invalid device_id' });
+        return;
+      }
+      if (!deviceId) {
+        res.status(400).json({ success: false, ok: false, error: 'device_id is required' });
+        return;
+      }
+
+      try {
+        const image = await imageBridge.captureScreenshot(deviceId);
+        res.json({
+          success: true,
+          ok: true,
+          device_id: deviceId,
+          image_url: imageUrlForRequest(req, image, publicBaseUrl),
+          expires_at: image.expiresAt,
+          bytes: image.bytes,
+          mime_type: image.mimeType,
+        });
+      } catch (error) {
+        sendImageBridgeError(res, error);
+      }
+    },
+  );
+
+  router.post(
+    '/upload_device_image',
+    express.json({
+      limit: httpBodyLimit,
+      type: ['application/json', 'application/*+json'],
+    }),
+    async (req, res) => {
+      if (!isJsonObject(req.body)) {
+        res.status(400).json({ success: false, ok: false, error: 'Request body must be a JSON object' });
+        return;
+      }
+
+      let deviceId: string | undefined;
+      try {
+        deviceId = parseOptionalDeviceId(req.body.device_id);
+      } catch {
+        res.status(400).json({ success: false, ok: false, error: 'Invalid device_id' });
+        return;
+      }
+      if (!deviceId) {
+        res.status(400).json({ success: false, ok: false, error: 'device_id is required' });
+        return;
+      }
+      if (typeof req.body.path !== 'string') {
+        res.status(400).json({ success: false, ok: false, error: 'path must be a string' });
+        return;
+      }
+
+      try {
+        const image = await imageBridge.uploadDeviceImage(deviceId, req.body.path);
+        res.json({
+          success: true,
+          ok: true,
+          device_id: deviceId,
+          image_url: imageUrlForRequest(req, image, publicBaseUrl),
+          expires_at: image.expiresAt,
+          bytes: image.bytes,
+          mime_type: image.mimeType,
+        });
+      } catch (error) {
+        sendImageBridgeError(res, error);
+      }
+    },
+  );
 
   router.post(
     '/images/analyze',
@@ -431,4 +525,21 @@ export function createActionRouter(
   );
 
   return router;
+}
+
+function sendImageBridgeError(
+  res: import('express').Response,
+  error: unknown,
+): void {
+  if (error instanceof ImageBridgeError) {
+    res.status(error.status).json({ success: false, ok: false, error: error.message });
+    return;
+  }
+
+  const message = error instanceof Error ? error.message : String(error);
+  let status = 502;
+  if (message.includes('not available')) status = 404;
+  else if (message.includes('not connected') || message.includes('No Desktop Commander agent')) status = 409;
+  else if (message.includes('timed out')) status = 504;
+  res.status(status).json({ success: false, ok: false, error: message });
 }
