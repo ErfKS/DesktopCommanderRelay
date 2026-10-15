@@ -1,0 +1,22 @@
+# Add the following inside an HTTPS frontend/backend layout. Do not replace the
+# production HAProxy configuration without reviewing its existing ACLs and TLS setup.
+
+frontend relay_https
+    bind :443 ssl crt /etc/haproxy/certs/mcp-relay.pem
+    mode http
+    option forwardfor
+    http-request set-header X-Forwarded-Proto https
+    http-request set-header Host %[req.hdr(Host)]
+    default_backend relay_server
+
+backend relay_server
+    mode http
+    option http-server-close
+    timeout connect 5s
+    timeout server 310s
+    timeout tunnel 1h
+    server relay 127.0.0.1:8787 check
+
+# HAProxy forwards Authorization by default. The backend must also preserve the
+# Upgrade/Connection headers for /agent WebSocket requests in the surrounding
+# production configuration.

@@ -14,7 +14,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/DesktopCommanderRelay
+ReadWritePaths=/opt/DesktopCommanderRelay /var/lib/desktop-commander-relay/oauth
 
 [Install]
 WantedBy=multi-user.target

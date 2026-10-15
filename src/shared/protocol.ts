@@ -18,6 +18,7 @@ export interface ToolDefinition {
   inputSchema: JsonObject;
   outputSchema?: JsonObject;
   annotations?: JsonObject;
+  securitySchemes?: Array<JsonObject>;
   _meta?: JsonObject;
 }
 
@@ -138,6 +139,9 @@ export function sanitizeToolDefinition(tool: unknown): ToolDefinition | null {
   if (typeof tool.description === 'string') out.description = tool.description;
   if (isJsonObject(tool.outputSchema)) out.outputSchema = tool.outputSchema;
   if (isJsonObject(tool.annotations)) out.annotations = tool.annotations;
+  if (Array.isArray(tool.securitySchemes) && tool.securitySchemes.every(isJsonObject)) {
+    out.securitySchemes = tool.securitySchemes;
+  }
   if (isJsonObject(tool._meta)) out._meta = tool._meta;
   return out;
 }

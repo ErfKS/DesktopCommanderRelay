@@ -455,6 +455,8 @@ The relay limits HTTP/WebSocket payloads, pending and queued work, and tool-call
 
 For a private personal ChatGPT integration, keep the Custom GPT private and avoid sharing its Action credentials.
 
+OAuth 2.1 for ChatGPT Web is an opt-in second authentication path for `/mcp`; it does not replace `MCP_API_KEY`, `ACTION_API_KEY`, or `AGENT_TOKEN`. The complete setup, owner provisioning, deployment, HAProxy example, tests, and rollback procedure are in [`docs/OAUTH.md`](docs/OAUTH.md). The intended production MCP URL is `https://mcp-relay.katebsaber.ir/mcp`.
+
 ## Failure and retry semantics
 
 Each forwarded tool call has one relay call ID. The agent retains a bounded result cache and does not execute a duplicate ID twice; an in-flight duplicate receives the existing result when available.
@@ -491,6 +493,8 @@ Use the analogous `desktop-commander-relay-agent.service` commands for the agent
 [`deploy/nginx.conf.example`](deploy/nginx.conf.example) contains the MCP and agent proxy routes, forwarded headers, buffering settings, body-size limit, and timeouts used by the example. TLS termination belongs in the HTTPS server block, not in the Node process.
 
 If the Action API is enabled, proxy `/action` and `/action/*` to the same `127.0.0.1:8787` upstream and preserve the Bearer `Authorization` header.
+
+For HAProxy deployments, see [`deploy/haproxy.cfg.example`](deploy/haproxy.cfg.example). OAuth discovery and `/oauth/*` routes must reach the same backend as `/mcp`.
 
 ## Development
 

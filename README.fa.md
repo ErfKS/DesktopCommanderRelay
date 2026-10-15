@@ -439,6 +439,8 @@ force_terminate
 
 ‏برای یک integration شخصی و خصوصی با ChatGPT، Custom GPT را private نگه دارید و Action credentialهای آن را به اشتراک نگذارید.
 
+‏OAuth 2.1 برای ChatGPT Web یک مسیر احراز هویت دوم و opt-in برای `/mcp` است و جایگزین `MCP_API_KEY`، `ACTION_API_KEY` یا `AGENT_TOKEN` نمی‌شود. راهنمای کامل provisioning مالک، deployment، نمونهٔ HAProxy، تست و rollback در [`docs/OAUTH.md`](docs/OAUTH.md) قرار دارد. URL مربوط به MCP در deployment واقعی `https://mcp-relay.katebsaber.ir/mcp` است.
+
 ## ‏رفتار failure و retry
 
 ‏هر tool call که forward می‌شود یک Relay call ID دارد. Agent یک result cache محدود نگه می‌دارد و یک ID تکراری را دو بار اجرا نمی‌کند؛ duplicate در حال اجرا نیز در صورت موجود بودن، همان نتیجه موجود را دریافت می‌کند.
@@ -475,6 +477,8 @@ sudo systemctl status desktop-commander-relay-server.service
 ‏[`deploy/nginx.conf.example`](deploy/nginx.conf.example) شامل routeهای proxy مربوط به MCP و Agent، headerهای forwardشده، تنظیمات buffering، محدودیت body size و timeoutهای مورد استفاده در نمونه است. TLS termination باید داخل HTTPS server block انجام شود، نه داخل Node process.
 
 ‏اگر Action API فعال است، مسیرهای `/action` و `/action/*` را به همان upstream یعنی `127.0.0.1:8787` proxy کنید و header مربوط به Bearer `Authorization` را حفظ کنید.
+
+‏برای deployment با HAProxy، نمونهٔ [`deploy/haproxy.cfg.example`](deploy/haproxy.cfg.example) را ببینید. مسیرهای discovery و `/oauth/*` باید مانند `/mcp` به همان backend برسند.
 
 ## ‏توسعه
 

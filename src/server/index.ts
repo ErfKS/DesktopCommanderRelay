@@ -1,14 +1,14 @@
 import 'dotenv/config';
 import http from 'node:http';
 import express from 'express';
-import { bearerMiddleware } from './auth.js';
 import { DeviceRegistry } from './device-registry.js';
 import { AgentWebSocketServer } from './ws-agent-server.js';
 import { createMcpRequestHandler } from './mcp.js';
 import { createActionRouter } from './action-api.js';
 import { createImageBridgeFromEnv } from './image-bridge.js';
+import { loadOAuthConfig, OAuthService } from './oauth.js';
 import { envBool, envInt, envOptional, envString, splitCsv } from '../shared/env.js';
-import { normalizeDeviceId } from '../shared/security.js';
+import { normalizeDeviceId, parseBearerHeader, timingSafeEqualText } from '../shared/security.js';
 import { RELAY_VERSION } from '../shared/version.js';
 import { hostHeaderValidation, originValidation } from '@modelcontextprotocol/node';
 
@@ -37,10 +37,12 @@ const allowedOriginHostnames = configuredOrigins.length > 0
       try { return new URL(origin).hostname; } catch { return origin; }
     })
   : allowedHostnames;
+const oauthConfig = loadOAuthConfig();
+const oauth = oauthConfig ? new OAuthService(oauthConfig) : undefined;
 
 const publicHost = ['0.0.0.0', '::'].includes(host);
-if ((!mcpApiKey || !agentToken) && !(allowInsecureLocal && !publicHost)) {
-  throw new Error('MCP_API_KEY and AGENT_TOKEN are required unless ALLOW_INSECURE_LOCAL=true on a loopback bind');
+if ((!mcpApiKey && !oauth || !agentToken) && !(allowInsecureLocal && !publicHost)) {
+  throw new Error('MCP_API_KEY or enabled OAuth, and AGENT_TOKEN are required unless ALLOW_INSECURE_LOCAL=true on a loopback bind');
 }
 if (publicHost && configuredHosts.length === 0) {
   throw new Error('MCP_ALLOWED_HOSTS is required when HOST is public; set it to the public relay hostname(s)');
@@ -91,14 +93,45 @@ app.use(
   ),
 );
 
-const mcpRequestHandler = createMcpRequestHandler(registry);
+if (oauth) app.use(oauth.router());
+
+const mcpRequestHandler = createMcpRequestHandler(
+  registry,
+  (res) => (res as express.Response).locals.mcpOAuth,
+  !!oauth,
+);
 const validateMcpHost = hostHeaderValidation(allowedHostnames);
 const validateMcpOrigin = originValidation(allowedOriginHostnames);
-app.all(mcpPath, bearerMiddleware(mcpApiKey, allowInsecureLocal), (req, res, next) => {
+const authenticateMcp = async (req: express.Request, res: express.Response, next: express.NextFunction): Promise<void> => {
+  const token = parseBearerHeader(req.headers.authorization);
+  if (mcpApiKey && token && timingSafeEqualText(token, mcpApiKey)) {
+    next();
+    return;
+  }
+  if (oauth) {
+    await oauth.authenticateRequest(req, res, next);
+    return;
+  }
+  if (!mcpApiKey && allowInsecureLocal && !publicHost) {
+    next();
+    return;
+  }
+  res.setHeader('WWW-Authenticate', 'Bearer realm="desktop-commander-relay"');
+  res.status(mcpApiKey ? 401 : 503).json({ error: mcpApiKey ? 'Unauthorized' : 'MCP_API_KEY is not configured' });
+};
+
+app.all(mcpPath, authenticateMcp, (req, res, next) => {
   if (!validateMcpHost(req, res)) return;
   if (!validateMcpOrigin(req, res)) return;
   next();
 }, express.json({ limit: httpBodyLimit, type: ['application/json', 'application/*+json'] }), async (req, res) => {
+  if (oauth && res.locals.mcpOAuth) {
+    const requestedTool = req.body?.method === 'tools/call' ? req.body?.params?.name : undefined;
+    const requiredScope = req.body?.method === 'tools/call' && !['relay_status', 'relay_list_devices'].includes(requestedTool)
+      ? 'mcp:write'
+      : 'mcp:read';
+    if (!oauth.requireScope(req, res, requiredScope)) return;
+  }
   try {
     await mcpRequestHandler(req, res, req.body);
   } catch (error) {
@@ -129,6 +162,7 @@ httpServer.listen(port, host, () => {
   console.error(`[relay] HTTP listening on http://${host}:${port}${mcpPath}`);
   console.error(`[relay] Agent WebSocket path: ${agentPath}`);
   if (targetDeviceId) console.error(`[relay] Target device: ${targetDeviceId}`);
+  if (oauth) console.error(`[relay] OAuth issuer: ${oauth.config.issuerUrl}`);
 });
 
 let shuttingDown = false;
