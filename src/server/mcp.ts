@@ -4,6 +4,10 @@ import type { Request, Response } from 'express';
 import { DeviceRegistry } from './device-registry.js';
 import type { McpOAuthContext } from './oauth.js';
 import { RELAY_VERSION } from '../shared/version.js';
+import { BROWSER_UI_HTML } from './browser-ui.js';
+
+const BROWSER_UI_URI = 'ui://deskbridge-sandbox/browser';
+const BROWSER_UI_MIME = 'text/html;profile=mcp-app';
 import { isJsonObject, type ToolDefinition } from '../shared/protocol.js';
 
 const RELAY_STATUS_TOOL: ToolDefinition = {
@@ -15,6 +19,12 @@ const RELAY_STATUS_TOOL: ToolDefinition = {
 const RELAY_LIST_DEVICES_TOOL: ToolDefinition = {
   name: 'relay_list_devices',
   description: 'List Desktop Commander agents currently connected to this private relay.',
+  inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+};
+
+const BROWSER_LAUNCH_TOOL: ToolDefinition = {
+  name: 'browser_launch',
+  description: 'Launch the DeskBridge Sandbox browser interface without navigating or changing the website.',
   inputSchema: { type: 'object', properties: {}, additionalProperties: false },
 };
 
@@ -45,15 +55,28 @@ export function createMcpServer(
 ): Server {
   const server = new Server(
     { name: 'desktop-commander-relay', version: RELAY_VERSION },
-    { capabilities: { tools: {} } },
+    { capabilities: { tools: {}, resources: {} } },
   );
 
   const selectedDeviceId = registry.getSelectedDevice()?.id?.toLowerCase();
   const selectedDeviceAllowed = !oauthContext
     || (selectedDeviceId !== undefined && (oauthContext.allowedDeviceIds.has('*') || oauthContext.allowedDeviceIds.has(selectedDeviceId)));
 
+  server.setRequestHandler('resources/list', async () => ({
+    resources: [{ name: 'DeskBridge Sandbox Browser', uri: BROWSER_UI_URI, mimeType: BROWSER_UI_MIME }],
+  }));
+  server.setRequestHandler('resources/read', async (request) => {
+    if (request.params.uri !== BROWSER_UI_URI) throw new Error('Unknown MCP App resource');
+    return { contents: [{
+      uri: BROWSER_UI_URI,
+      mimeType: BROWSER_UI_MIME,
+      text: BROWSER_UI_HTML,
+      _meta: { ui: { csp: { connectDomains: [], resourceDomains: [], frameDomains: [] }, prefersBorder: true } },
+    }] };
+  });
+
   server.setRequestHandler('tools/list', async () => ({
-    tools: [RELAY_STATUS_TOOL, RELAY_LIST_DEVICES_TOOL, ...registry.listMcpTools()]
+    tools: [RELAY_STATUS_TOOL, RELAY_LIST_DEVICES_TOOL, BROWSER_LAUNCH_TOOL, ...registry.listMcpTools()]
       .filter((tool) => {
         if (!oauthContext) return true;
         if (!oauthContext.allowedTools.has('*') && !oauthContext.allowedTools.has(tool.name)) return false;
@@ -61,10 +84,20 @@ export function createMcpServer(
       })
       .map((tool) => ({
         ...tool,
+        ...(tool.name === 'browser_launch' ? {
+          _meta: {
+            ...tool._meta,
+            ui: { resourceUri: BROWSER_UI_URI },
+            'openai/ui': { entrypoints: [{ type: 'global' }] },
+          },
+        } : {}),
+        ...(tool.name === 'browser_open' ? {
+          _meta: { ...tool._meta, ui: { resourceUri: BROWSER_UI_URI } },
+        } : {}),
         ...(oauthEnabled ? {
           securitySchemes: [{
             type: 'oauth2',
-            scopes: tool.name === 'relay_status' || tool.name === 'relay_list_devices' ? ['mcp:read'] : ['mcp:write'],
+            scopes: tool.name === 'relay_status' || tool.name === 'relay_list_devices' || tool.name === 'browser_launch' ? ['mcp:read'] : ['mcp:write'],
           }],
         } : {}),
       })) as Tool[],
@@ -72,6 +105,19 @@ export function createMcpServer(
 
   server.setRequestHandler('tools/call', async (request) => {
     const name = request.params.name;
+    if (name === 'browser_launch') {
+      if (oauthContext && !oauthContext.scopes.has('mcp:read')) {
+        return authError(oauthContext, 'OAuth read permission is required', 'mcp:read');
+      }
+      if (oauthContext && !oauthContext.allowedTools.has('*') && !oauthContext.allowedTools.has(name)) {
+        return authError(oauthContext, 'Browser launcher is not allowed', 'mcp:read');
+      }
+      if (oauthContext && !selectedDeviceAllowed) {
+        return authError(oauthContext, 'Selected device is not authorized', 'mcp:read');
+      }
+      return textResult('DeskBridge Sandbox browser interface ready.');
+    }
+
     if (name === 'relay_status') {
       if (oauthContext && !oauthContext.scopes.has('mcp:read')) {
         return authError(oauthContext, 'OAuth read permission is required', 'mcp:read');

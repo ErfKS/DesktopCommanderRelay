@@ -20,6 +20,9 @@ test('forwards a real Streamable HTTP MCP call through an authenticated agent', 
       PORT: String(port),
       MCP_API_KEY: 'mcp-e2e-token',
       AGENT_TOKEN: 'agent-e2e-token',
+      // Never let this root-run test read or rewrite the deployed OAuth store.
+      // The server loads .env after spawn, so override OAuth explicitly.
+      MCP_OAUTH_ENABLED: 'false',
       MCP_ALLOWED_HOSTS: '127.0.0.1',
       MCP_ALLOWED_ORIGINS: 'http://127.0.0.1',
       TOOL_CALL_TIMEOUT_MS: '2000',
