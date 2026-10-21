@@ -1,6 +1,7 @@
 import os from 'node:os';
 import WebSocket from 'ws';
 import { LocalDesktopCommander } from './local-desktop-commander.js';
+import { BrowserController, BROWSER_TOOLS } from './browser-controller.js';
 import { captureLinuxScreenshot } from './screenshot.js';
 import { envInt, envOptional, envString } from '../shared/env.js';
 import {
@@ -18,6 +19,7 @@ import { RELAY_PROTOCOL_VERSION, RELAY_VERSION } from '../shared/version.js';
 
 export class RelayAgent {
   private readonly local = new LocalDesktopCommander();
+  private readonly browser = new BrowserController();
   private socket: WebSocket | null = null;
   private stopped = false;
   private reconnectDelay: number;
@@ -64,6 +66,7 @@ export class RelayAgent {
   async stop(): Promise<void> {
     this.stopped = true;
     try { this.socket?.close(1000, 'Agent shutting down'); } catch { /* best effort */ }
+    await this.browser.close();
     await this.local.close();
   }
 
@@ -158,7 +161,9 @@ export class RelayAgent {
     try {
       const result = call.name === RELAY_CAPTURE_SCREENSHOT_TOOL
         ? await captureLinuxScreenshot(readScreenshotLimit(call.arguments))
-        : await this.local.callTool(call.name, call.arguments, call.metadata ?? {});
+        : BROWSER_TOOLS.some((tool) => tool.name === call.name)
+          ? await this.browser.call(call.name, call.arguments)
+          : await this.local.callTool(call.name, call.arguments, call.metadata ?? {});
       message = { type: 'tool_result', id: call.id, ok: true, result };
     } catch (error) {
       message = {
@@ -245,6 +250,7 @@ export class RelayAgent {
     return [
       ...tools.filter((tool) => tool.name !== RELAY_CAPTURE_SCREENSHOT_TOOL),
       RELAY_CAPTURE_SCREENSHOT_TOOL_DEFINITION,
+      ...BROWSER_TOOLS,
     ];
   }
 
