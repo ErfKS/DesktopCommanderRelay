@@ -58,6 +58,20 @@ MCP_OAUTH_ALLOWED_DEVICE_IDS=home-pc
 
 Use * only after reviewing the resulting exposure. The allowlist is enforced at tools/list and again at every tools/call; a client-supplied device_id cannot select a device outside the configured policy.
 
+### Multiple devices from one ChatGPT MCP connection
+
+OAuth-authenticated MCP clients can use all currently connected devices listed in `MCP_OAUTH_ALLOWED_DEVICE_IDS` without changing `TARGET_DEVICE_ID`. Agent tools exposed through `tools/list` include a **required** `device_id` argument, restricted to the connected, authorized agents that advertise each tool. The relay validates the target and removes the routing argument before forwarding the request to that agent.
+
+For example, with `TARGET_DEVICE_ID=webdade` and `MCP_OAUTH_ALLOWED_DEVICE_IDS=webdade,pectin,ai-core,telegram-core`:
+
+~~~json
+{"name":"read_file","arguments":{"device_id":"pectin","path":"/home/pachim/example.txt"}}
+~~~
+
+Another call to `read_file` can use `"device_id":"webdade"` within the same session. Missing or unauthorized `device_id` values fail closed. Legacy API-key MCP clients and the Action API retain their existing `TARGET_DEVICE_ID` behavior.
+
+You must also include each desired agent tool name in `MCP_OAUTH_ALLOWED_TOOLS` (for example `read_file,list_directory,start_process,read_process_output`). Never use `*` as a shortcut without reviewing the full privileges of every connected agent. A command-execution tool can modify files even if used initially for read-only work. After updating code and policy, restart the relay and refresh the MCP connector tool list in ChatGPT.
+
 The built-in redirect policy accepts only:
 
 - https://chatgpt.com/connector_platform_oauth_redirect
